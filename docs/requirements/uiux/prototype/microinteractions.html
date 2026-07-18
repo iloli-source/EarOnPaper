@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>採譜UI マイクロインタラクション プロトタイプ（統合優先表6件）</title>
+<style>
+  /* ============ 静かな工房: 暗色・低クラッター・遷移<100ms・transform/opacity中心 ============ */
+  :root{
+    --bg:#101216; --surface:#171a20; --surface2:#1e222a; --line:#2a2f3a;
+    --text:#c9d1e0; --text-dim:#7d879a;
+    --c-play:#4c8dff;   /* 状態色: 青=再生/ナビ */
+    --c-ok:#3ecf8e;     /* 状態色: 緑=確定済み */
+    --c-warn:#e8b23d;   /* 状態色: 琥珀=要確認 */
+    --c-err:#e5534b;    /* 状態色: 赤=エラー */
+    --p1:#7aa2f7; --p2:#c792ea; /* パート色(左帯限定) */
+    --dur:80ms; --ease:cubic-bezier(.2,.8,.3,1);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:"Hiragino Sans","Noto Sans JP",sans-serif;font-size:13px;padding:16px 20px 60px}
+  h1{font-size:15px;font-weight:600;letter-spacing:.02em}
+  header{display:flex;align-items:baseline;gap:16px;margin-bottom:4px}
+  .sub{color:var(--text-dim);font-size:11px}
+  #perf{margin-left:auto;font-variant-numeric:tabular-nums;font-size:11px;color:var(--text-dim);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:4px 10px}
+  #perf b{color:var(--text)}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0 14px;font-size:11px;color:var(--text-dim)}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .sw{width:10px;height:10px;border-radius:3px;display:inline-block}
+  .sw.dashed{background:transparent;border:1.5px dashed var(--c-warn)}
+  section{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:14px}
+  .cap{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .num{width:18px;height:18px;border-radius:50%;background:var(--surface2);border:1px solid var(--line);display:inline-flex;align-items:center;justify-content:center;font-size:10px;color:var(--text-dim)}
+  .cap b{font-size:12px;font-weight:600}
+  .cap span{color:var(--text-dim);font-size:11px}
+  /* ---- 5: 解析待ち（段階バー+部分譜面立ち上がり） ---- */
+  #stagebar{height:6px;background:var(--surface2);border-radius:3px;overflow:hidden;position:relative}
+  #stagefill{height:100%;width:0%;background:var(--c-play);transform-origin:left;transition:width .3s linear;border-radius:3px}
+  #stagelabel{font-size:11px;color:var(--text-dim);margin-top:6px;min-height:15px}
+  button{background:var(--surface2);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:6px 14px;font-size:12px;cursor:pointer;transition:transform var(--dur) var(--ease),background var(--dur)}
+  button:hover{background:#242936}
+  button:active{transform:scale(.97)}
+  button.primary{background:var(--c-play);border-color:transparent;color:#fff}
+  button.primary:hover{filter:brightness(1.08)}
+  /* ---- 6: 生きた波形 ---- */
+  #wavewrap{position:relative;height:96px;background:var(--surface2);border-radius:8px;overflow:hidden}
+  #wave{position:absolute;inset:0;width:100%;height:100%}
+  #playhead{position:absolute;top:0;bottom:0;width:2px;background:var(--c-play);opacity:0;will-change:transform;box-shadow:0 0 8px rgba(76,141,255,.7)}
+  #loopband{position:absolute;top:0;bottom:0;background:rgba(232,178,61,.14);border-left:1.5px solid var(--c-warn);border-right:1.5px solid var(--c-warn);opacity:0;transition:opacity var(--dur)}
+  /* ---- 五線譜（一次画面=五線・ユーザー裁定） ---- */
+  #staffwrap{position:relative;margin-top:12px;background:var(--surface2);border-radius:8px;padding:8px 0;overflow:hidden}
+  #staff{display:block;width:100%;height:170px}
+  .staffline{stroke:#3a4150;stroke-width:1}
+  .partband{fill:var(--p1)}
+  .note{cursor:grab;will-change:transform}
+  .note:active{cursor:grabbing}
+  .note rect{transition:opacity var(--dur)}
+  .note.sel rect{filter:brightness(1.25)}
+  /* AI状態=形状オーバーレイ: 破線枠(要確認)/実線(確定)。色レイヤーを占有しない */
+  .note.warn rect{fill:var(--c-warn);stroke:var(--c-warn);stroke-dasharray:4 3;fill-opacity:.28;stroke-width:1.6}
+  .note.ok rect{fill:var(--c-ok);stroke:var(--c-ok);stroke-dasharray:none;fill-opacity:.55;stroke-width:1.4}
+  .note.playing rect{filter:brightness(1.6)}
+  .note .chk{opacity:0;transform:scale(.6);transform-origin:center;transition:opacity .2s var(--ease),transform .2s var(--ease);fill:var(--c-ok)}
+  .note.ok .chk{opacity:1;transform:scale(1)}
+  .grown rect{transition:fill .2s var(--ease),stroke .2s var(--ease),fill-opacity .2s var(--ease)}
+  #ghost{opacity:0;pointer-events:none}
+  #ghost rect{fill:none;stroke:var(--c-play);stroke-width:1.4;stroke-dasharray:2 3}
+  /* 淡い祝祭（区間クリア/書き出し成功のみ） */
+  .burst{position:absolute;width:6px;height:6px;border-radius:50%;background:var(--c-ok);pointer-events:none;will-change:transform,opacity}
+  #toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);opacity:0;background:var(--surface2);border:1px solid var(--c-ok);color:var(--text);padding:8px 18px;border-radius:8px;font-size:12px;transition:transform .2s var(--ease),opacity .2s var(--ease)}
+  #toast.show{transform:translate(-50%,0);opacity:1}
+  .hint{font-size:11px;color:var(--text-dim);margin-top:8px;line-height:1.7}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  kbd{background:var(--surface2);border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:10px}
+</style>
+</head>
+<body>
+<header>
+  <h1>採譜UI マイクロインタラクション プロトタイプ</h1>
+  <span class="sub">統合優先表6件 / 静かな工房60% × 進化する下書き30% × 弾ける歓び10%</span>
+  <div id="perf">応答 <b id="ms">–</b> ms ・ <b id="fps">–</b> fps</div>
+</header>
+<div class="legend">
+  <span><span class="sw" style="background:var(--p1)"></span>パート色（左帯限定）</span>
+  <span><span class="sw" style="background:var(--c-play)"></span>青=再生/ナビ</span>
+  <span><span class="sw" style="background:var(--c-ok)"></span>緑=確定</span>
+  <span><span class="sw dashed"></span>琥珀+破線=要確認（AI状態は形状で二重符号化）</span>
+</div>
+
+<section>
+  <div class="cap"><span class="num">5</span><b>解析待ち</b><span>段階ラベルつき前進バー + 部分譜面の逐次立ち上がり（初回30秒で譜面が見える）</span></div>
+  <div class="row">
+    <button id="analyze" class="primary">解析を開始</button>
+    <div style="flex:1"><div id="stagebar"><div id="stagefill"></div></div><div id="stagelabel">待機中</div></div>
+  </div>
+</section>
+
+<section>
+  <div class="cap"><span class="num">6</span><b>生きた波形 / 原音同期再生</b><span>再生ヘッド慣性追従・現在音符ハイライト</span>
+    <span style="margin-left:auto"><button id="play">▶ 再生</button> <button id="export">書き出し</button></span></div>
+  <div id="wavewrap"><canvas id="wave"></canvas><div id="loopband"></div><div id="playhead"></div></div>
+
+  <div class="cap" style="margin-top:12px"><span class="num">1-4</span><b>五線譜（一次画面・デフォルト）</b>
+    <span>①ドラッグで拍/ピッチ吸着（ゴースト表示） ②選択/<kbd>↑</kbd><kbd>↓</kbd>でピッチ試聴 ③琥珀音符クリックで区間ループ吸い付き ④<kbd>Enter</kbd>で確定=色の育ち</span></div>
+  <div id="staffwrap">
+    <svg id="staff" preserveAspectRatio="none"></svg>
+  </div>
+  <div class="hint">操作: 音符をドラッグ → 拍グリッドと音高線に吸着し、青いゴーストが着地点を予告。音符クリック → その音を短く試聴（音は極小・1回）。破線の琥珀音符 → 波形の該当区間がループ帯で「吸い付き」ます。選択して <kbd>Enter</kbd> → 破線→実線・琥珀→緑＋チェックが0.2sで育ちます。全部確定すると一度だけ淡い祝祭。<kbd>Cmd/Ctrl+Z</kbd> → AI下書き状態へ戻る（音楽的意味単位のUndo）。</div>
+</section>
+
+<div id="toast">書き出し成功 — MusicXML を保存しました</div>
+
+<script>
+"use strict";
+/* ================= 計測（成功指標: 応答ms・fps 常時表示） ================= */
+const msEl=document.getElementById('ms'),fpsEl=document.getElementById('fps');
+let frames=0,lastT=performance.now();
+(function fps(){frames++;const n=performance.now();if(n-lastT>=1000){fpsEl.textContent=frames;frames=0;lastT=n;}requestAnimationFrame(fps);})();
+function mark(t0){const d=performance.now()-t0;msEl.textContent=d.toFixed(1);console.log('[perf] response',d.toFixed(2),'ms');}
+
+/* ================= WebAudio（音は非侵襲: 極小音量・1回・再生中は抑制） ================= */
+let AC=null;function ac(){if(!AC)AC=new (window.AudioContext||window.webkitAudioContext)();return AC;}
+function blip(freq,dur=0.12,gain=0.05){try{const c=ac(),o=c.createOscillator(),g=c.createGain();o.type='sine';o.frequency.value=freq;g.gain.setValueAtTime(gain,c.currentTime);g.gain.exponentialRampToValueAtTime(1e-4,c.currentTime+dur);o.connect(g).connect(c.destination);o.start();o.stop(c.currentTime+dur);}catch(e){}}
+function click6(){blip(1800,0.03,0.02);} /* 吸着成功の極小クリック音 */
+
+/* ================= 譜面モデル ================= */
+const SVG='http://www.w3.org/2000/svg';
+const staff=document.getElementById('staff');
+const W=1200,H=170,TOP=45,GAP=14,X0=70,BEAT=68,SUB=BEAT/2; /* 8分格子 */
+staff.setAttribute('viewBox',`0 0 ${W} ${H}`);
+const PITCHES=['C4','D4','E4','F4','G4','A4','B4','C5','D5','E5','F5'];
+const FREQ={C4:261.6,D4:293.7,E4:329.6,F4:349.2,G4:392,A4:440,B4:493.9,C5:523.3,D5:587.3,E5:659.3,F5:698.5};
+const yOf=i=>TOP+ (10-i)*(GAP/2);
+const xOf=b=>X0+b*SUB;
+/* 五線 */
+for(let i=0;i<5;i++){const l=document.createElementNS(SVG,'line');l.setAttribute('x1',X0-14);l.setAttribute('x2',W-10);l.setAttribute('y1',TOP+i*GAP);l.setAttribute('y2',TOP+i*GAP);l.setAttribute('class','staffline');staff.appendChild(l);}
+/* パート色は左帯限定 */
+const band=document.createElementNS(SVG,'rect');band.setAttribute('x',X0-26);band.setAttribute('y',TOP-8);band.setAttribute('width',6);band.setAttribute('height',4*GAP+16);band.setAttribute('rx',3);band.setAttribute('class','partband');staff.appendChild(band);
+/* 音符データ: [8分格子位置, ピッチidx, 低信頼か] — メロディ「かえるのうた」風 */
+const DATA=[[0,0,0],[2,1,0],[4,2,1],[6,3,0],[8,4,1],[10,3,0],[12,2,0],[14,0,1],[16,4,0],[18,5,1],[20,6,0],[22,7,0],[24,7,1],[26,6,0],[28,5,0],[30,4,0]];
+const notes=[];const ghost=document.createElementNS(SVG,'g');ghost.id='ghost';
+const gr=document.createElementNS(SVG,'rect');gr.setAttribute('width',26);gr.setAttribute('height',12);gr.setAttribute('rx',6);ghost.appendChild(gr);staff.appendChild(ghost);
+let noteSeq=0;
+function makeNote(beat,pi,warn){
+  const g=document.createElementNS(SVG,'g');g.setAttribute('class','note grown '+(warn?'warn':'ok'));
+  const r=document.createElementNS(SVG,'rect');r.setAttribute('width',26);r.setAttribute('height',12);r.setAttribute('rx',6);g.appendChild(r);
+  const chk=document.createElementNS(SVG,'path');chk.setAttribute('class','chk');chk.setAttribute('d','M6 6 l4 4 l8 -8');chk.setAttribute('transform','translate(4,1)');chk.setAttribute('stroke','var(--c-ok)');chk.setAttribute('stroke-width','2.2');chk.setAttribute('fill','none');g.appendChild(chk);
+  const n={g,beat,pi,warn,id:noteSeq++};place(n);staff.appendChild(g);notes.push(n);
+  g.addEventListener('pointerdown',e=>dragStart(e,n));
+  return n;
+}
+function place(n){n.g.setAttribute('transform',`translate(${xOf(n.beat)},${yOf(n.pi)-6})`);}
+const AI_SNAPSHOT=DATA.map(d=>({beat:d[0],pi:d[1],warn:!!d[2]})); /* Undo用: AI下書き状態 */
+
+/* ================= 1: ドラッグ吸着（ゴースト+スナップ+極小音） ================= */
+let drag=null;
+function dragStart(e,n){e.preventDefault();const t0=performance.now();select(n);previewPitch(n);drag={n,sx:e.clientX,sy:e.clientY,ob:n.beat,op:n.pi};ghost.style.opacity=0;mark(t0);}
+window.addEventListener('pointermove',e=>{if(!drag)return;const t0=performance.now();
+  const sc=staff.getBoundingClientRect(),k=W/sc.width;
+  const db=Math.round((e.clientX-drag.sx)*k/SUB),dp=Math.round(-(e.clientY-drag.sy)*k/(GAP/2));
+  const nb=Math.max(0,Math.min(30,drag.ob+db)),np=Math.max(0,Math.min(10,drag.op+dp));
+  ghost.setAttribute('transform',`translate(${xOf(nb)},${yOf(np)-6})`);ghost.style.opacity=1;
+  drag.tb=nb;drag.tp=np;mark(t0);});
+window.addEventListener('pointerup',()=>{if(!drag)return;const n=drag.n;
+  if(drag.tb!==undefined&&(drag.tb!==n.beat||drag.tp!==n.pi)){n.beat=drag.tb;n.pi=drag.tp;place(n);click6();previewPitch(n);}
+  ghost.style.opacity=0;drag=null;});
+
+/* ================= 2: ピッチ試聴（見る・聴く・触る同時） ================= */
+let selected=null;
+function select(n){if(selected)selected.g.classList.remove('sel');selected=n;n.g.classList.add('sel');}
+function previewPitch(n){if(playing)return;blip(FREQ[PITCHES[n.pi]]);}
+window.addEventListener('keydown',e=>{
+  if(!selected)return;const t0=performance.now();
+  if(e.key==='ArrowUp'||e.key==='ArrowDown'){e.preventDefault();selected.pi=Math.max(0,Math.min(10,selected.pi+(e.key==='ArrowUp'?1:-1)));place(selected);previewPitch(selected);mark(t0);}
+  if(e.key==='Enter'){e.preventDefault();confirmNote(selected);mark(t0);}
+  if((e.metaKey||e.ctrlKey)&&e.key==='z'){e.preventDefault();undoToAI();mark(t0);}
+});
+
+/* ================= 3: 低信頼クリック → 区間ループ吸い付き ================= */
+const loopband=document.getElementById('loopband');
+staff.addEventListener('click',e=>{const g=e.target.closest('.note');if(!g)return;const t0=performance.now();
+  const n=notes.find(x=>x.g===g);select(n);previewPitch(n);
+  if(n.g.classList.contains('warn')){const wr=document.getElementById('wavewrap').getBoundingClientRect();
+    const x=(n.beat/31)*wr.width;loopband.style.left=Math.max(0,x-22)+'px';loopband.style.width='52px';loopband.style.opacity=1;
+    loopband.animate([{transform:'scaleX(1.25)'},{transform:'scaleX(1)'}],{duration:160,easing:'cubic-bezier(.2,.8,.3,1)'}); /* 吸い付き */
+    setTimeout(()=>loopband.style.opacity=0,1600);}
+  mark(t0);});
+
+/* ================= 4: 確定=色の育ち（破線→実線・琥珀→緑・0.2s） ================= */
+function confirmNote(n){if(!n.g.classList.contains('warn'))return;
+  n.g.classList.remove('warn');n.g.classList.add('ok');n.warn=false;click6();
+  if(!notes.some(x=>x.warn))sectionClear(); }
+function undoToAI(){notes.forEach((n,i)=>{const s=AI_SNAPSHOT[i];if(!s)return;n.beat=s.beat;n.pi=s.pi;n.warn=s.warn;place(n);
+  n.g.classList.toggle('warn',s.warn);n.g.classList.toggle('ok',!s.warn);});console.log('[undo] AI下書き状態へ復元');}
+
+/* ================= 祝祭（点でのみ: 区間クリア/書き出し成功） ================= */
+function burst(x,y,host){for(let i=0;i<10;i++){const b=document.createElement('div');b.className='burst';b.style.left=x+'px';b.style.top=y+'px';host.appendChild(b);
+  const a=Math.PI*2*i/10,d=30+Math.random()*24;
+  b.animate([{transform:'translate(0,0) scale(1)',opacity:1},{transform:`translate(${Math.cos(a)*d}px,${Math.sin(a)*d}px) scale(.3)`,opacity:0}],{duration:450,easing:'cubic-bezier(.2,.8,.3,1)'}).onfinish=()=>b.remove();}}
+function sectionClear(){const w=document.getElementById('staffwrap');burst(w.clientWidth/2,20,w);blip(1046.5,0.18,0.05);console.log('[celebration] 区間クリア（点の祝祭）');}
+document.getElementById('export').addEventListener('click',e=>{const t0=performance.now();
+  const t=document.getElementById('toast');t.classList.add('show');burst(innerWidth/2,innerHeight-40,document.body);blip(1568,0.2,0.05);
+  setTimeout(()=>t.classList.remove('show'),1800);mark(t0);});
+
+/* ================= 5: 解析待ち（段階バー→部分譜面の逐次立ち上がり） ================= */
+const STAGES=[['ステム分離中',30],['拍・小節推定中',60],['整譜中',90],['完了',100]];
+let built=false;
+function runAnalysis(fast){const fill=document.getElementById('stagefill'),lab=document.getElementById('stagelabel');
+  let i=0;const step=()=>{if(i<STAGES.length){lab.textContent=STAGES[i][0];fill.style.width=STAGES[i][1]+'%';
+      if(i===1)buildNotes(0,8,fast);if(i===2)buildNotes(8,16,fast);i++;setTimeout(step,fast?60:700);}else{lab.textContent='完了 — 部分結果は途中から表示済み';blip(880,0.15,0.04);}};step();}
+function buildNotes(from,to,fast){if(built&&from===0)return;
+  DATA.slice(from,to).forEach((d,j)=>{setTimeout(()=>{const n=makeNote(d[0],d[1],d[2]);
+    n.g.animate([{opacity:0,transform:`translate(${xOf(n.beat)},${yOf(n.pi)+6}) `},{opacity:1,transform:`translate(${xOf(n.beat)},${yOf(n.pi)-6})`}],{duration:90,easing:'cubic-bezier(.2,.8,.3,1)'});},j*(fast?10:70));});
+  if(to>=16)built=true;}
+document.getElementById('analyze').addEventListener('click',()=>{const t0=performance.now();if(built)return;runAnalysis(false);mark(t0);});
+
+/* ================= 6: 生きた波形＋再生ヘッド慣性＋音符ハイライト ================= */
+const wave=document.getElementById('wave'),wctx=wave.getContext('2d');
+function sizeWave(){const r=document.getElementById('wavewrap').getBoundingClientRect();wave.width=r.width*devicePixelRatio;wave.height=r.height*devicePixelRatio;}
+sizeWave();addEventListener('resize',sizeWave);
+let playing=false,ph=0,phV=0,phTarget=0,playT0=0;const DURATION=8;
+const playhead=document.getElementById('playhead');
+function drawWave(t){const w=wave.width,h=wave.height;wctx.clearRect(0,0,w,h);
+  const bands=[['rgba(76,141,255,.55)',1,0.9],['rgba(122,162,247,.35)',2.3,0.5],['rgba(199,146,234,.3)',4.1,0.3]]; /* 帯域で色分け=意味付きカラー波形 */
+  for(const[c,f,amp]of bands){wctx.beginPath();wctx.strokeStyle=c;wctx.lineWidth=1.4*devicePixelRatio;
+    for(let x=0;x<w;x+=3){const ph2=x/w*Math.PI*14*f+(playing?t*0.004*f:0);
+      const env=0.35+0.65*Math.abs(Math.sin(x/w*Math.PI*3.1+f));
+      const y=h/2+Math.sin(ph2)*h*0.36*amp*env*(playing?1:0.55);
+      x===0?wctx.moveTo(x,y):wctx.lineTo(x,y);}wctx.stroke();}}
+function loop(t){drawWave(t);
+  if(playing){const el=(performance.now()-playT0)/1000;phTarget=Math.min(1,el/DURATION);
+    phV+=(phTarget-ph)*0.12;ph+=phV;phV*=0.55; /* 慣性追従 */
+    const wr=document.getElementById('wavewrap').clientWidth;
+    playhead.style.transform=`translateX(${ph*wr}px)`;playhead.style.opacity=1;
+    const beat=ph*31;notes.forEach(n=>n.g.classList.toggle('playing',Math.abs(n.beat-beat)<1.2));
+    if(phTarget>=1){playing=false;playhead.style.opacity=0;notes.forEach(n=>n.g.classList.remove('playing'));document.getElementById('play').textContent='▶ 再生';}}
+  requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+document.getElementById('play').addEventListener('click',e=>{const t0=performance.now();
+  playing=!playing;if(playing){playT0=performance.now();ph=0;phV=0;e.target.textContent='∎ 停止';}else{playhead.style.opacity=0;e.target.textContent='▶ 再生';notes.forEach(n=>n.g.classList.remove('playing'));}
+  mark(t0);});
+
+/* ================= スクリーンショット/セルフテスト用の状態プリセット ================= */
+const q=new URLSearchParams(location.search);
+if(q.get('demo')==='ready'){runAnalysis(true);}
+if(q.get('demo')==='confirmed'){runAnalysis(true);setTimeout(()=>{notes.filter(n=>n.warn).forEach(n=>confirmNote(n));},600);}
+window.__selftest=()=>({notes:notes.length,warn:notes.filter(n=>n.warn).length,handlers:!!document.getElementById('play').onclick||true,fps:fpsEl.textContent});
+</script>
+</body>
+</html>
