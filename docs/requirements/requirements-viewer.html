@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI採譜プロジェクト 要件一覧（フル構想版）</title>
+<style>
+:root{
+  --paper:#faf8f4; --ink:#1f1b16; --ink-soft:#5c554b; --line:#e6e0d6;
+  --accent:#b4541e; --accent-soft:#f6e8dd;
+  --must:#b4541e; --should:#1d6a96; --could:#5a7d32; --wont:#8a8378;
+  --p1:#7a3aa0; --p2:#1d6a96; --p3:#8a8378;
+  --card:#ffffff; --radius:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;font-size:14px;line-height:1.65}
+.wrap{max-width:1100px;margin:0 auto;padding:36px 24px 80px}
+header{border-bottom:3px solid var(--ink);padding-bottom:20px;margin-bottom:8px}
+header .kicker{font-size:12px;letter-spacing:.18em;color:var(--accent);font-weight:700;margin-bottom:6px}
+header h1{font-size:clamp(22px,3.5vw,32px);font-weight:800;letter-spacing:.01em}
+header .date{color:var(--ink-soft);font-size:12px;margin-top:6px}
+.position{background:var(--accent-soft);border-left:4px solid var(--accent);padding:12px 16px;margin:18px 0;font-size:13px;color:#6b3a17;border-radius:0 8px 8px 0}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:22px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;box-shadow:0 1px 2px rgba(31,27,22,.04)}
+.card .num{font-size:28px;font-weight:800;line-height:1.1}
+.card .lbl{font-size:11px;color:var(--ink-soft);margin-top:2px;letter-spacing:.05em}
+.card.acc .num{color:var(--accent)}
+.tabs{display:flex;gap:0;margin:26px 0 0;border-bottom:2px solid var(--ink)}
+.tab{appearance:none;border:none;background:none;font:inherit;font-weight:700;font-size:15px;padding:10px 22px;cursor:pointer;color:var(--ink-soft);border-radius:8px 8px 0 0;position:relative}
+.tab:hover{background:#f1ece3;color:var(--ink)}
+.tab.active{background:var(--ink);color:var(--paper)}
+.tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:18px 0 6px}
+.search{flex:1 1 240px;min-width:200px}
+.search input{width:100%;padding:9px 14px;border:1.5px solid var(--line);border-radius:999px;font:inherit;background:var(--card);transition:border-color .15s}
+.search input:focus{outline:none;border-color:var(--accent)}
+.chiprow{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.chiprow .rowlbl{font-size:11px;font-weight:700;color:var(--ink-soft);letter-spacing:.08em;align-self:center;margin-right:4px;min-width:58px}
+.chip{appearance:none;border:1.5px solid var(--line);background:var(--card);font:inherit;font-size:12px;padding:4px 12px;border-radius:999px;cursor:pointer;color:var(--ink-soft);transition:all .12s}
+.chip:hover{border-color:var(--ink);color:var(--ink)}
+.chip.on{background:var(--ink);border-color:var(--ink);color:var(--paper);font-weight:700}
+.chip:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.count{font-size:12px;color:var(--ink-soft);margin:10px 2px}
+.catblock{margin:22px 0 6px}
+.catblock h2{font-size:16px;font-weight:800;display:flex;align-items:baseline;gap:8px;border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:10px}
+.catblock h2 .n{font-size:12px;color:var(--ink-soft);font-weight:600}
+.req{display:grid;grid-template-columns:74px 1fr auto;gap:4px 14px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px 16px;margin-bottom:8px;transition:box-shadow .15s,border-color .15s}
+.req:hover{border-color:#c9bfae;box-shadow:0 3px 10px rgba(31,27,22,.07)}
+.req .id{font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:700;color:var(--ink-soft);padding-top:2px}
+.req .body .nm{font-weight:700;font-size:14px}
+.req .body .ds{color:var(--ink-soft);font-size:12.5px;margin-top:2px}
+.req .body .src{font-size:11px;color:#9a917f;margin-top:5px}
+.req .body .src::before{content:"出典: "}
+.badges{display:flex;flex-direction:column;gap:5px;align-items:flex-end;min-width:120px}
+.bdg{font-size:10.5px;font-weight:700;letter-spacing:.05em;padding:2px 10px;border-radius:999px;white-space:nowrap}
+.b-Must{background:var(--must);color:#fff}
+.b-Should{background:var(--should);color:#fff}
+.b-Could{background:#eef2e4;color:var(--could);border:1px solid var(--could)}
+.b-Wont{background:#efece6;color:var(--wont);border:1px solid var(--wont);text-decoration:line-through}
+.b-P1{background:#f3e9fa;color:var(--p1);border:1px solid var(--p1)}
+.b-P2{background:#e6f0f7;color:var(--p2);border:1px solid var(--p2)}
+.b-P3{background:#f0ede7;color:var(--p3);border:1px solid var(--p3)}
+.metric{font-size:11px;color:var(--should);background:#eef5fa;border-radius:6px;padding:2px 8px;margin-top:5px;display:inline-block}
+.metric::before{content:"指標: ";font-weight:700}
+.empty{text-align:center;color:var(--ink-soft);padding:40px 0}
+footer{margin-top:40px;border-top:1px solid var(--line);padding-top:14px;font-size:11px;color:#9a917f}
+@media(max-width:640px){.req{grid-template-columns:1fr}.badges{flex-direction:row;align-items:center;justify-content:flex-start}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="kicker">SAIFU-AI / REQUIREMENTS — FULL CONCEPT</div>
+  <h1>AI採譜プロジェクト 要件一覧</h1>
+  <div class="date">作成日: 2026-07-18 ・ 調査レポート16本＋YouTube網羅調査に基づく ・ Markdown版と同一データから生成</div>
+</header>
+<div class="position" id="position"></div>
+<div class="cards" id="cards"></div>
+<div class="tabs" role="tablist">
+  <button class="tab active" id="tab-f" role="tab" aria-selected="true">機能要件</button>
+  <button class="tab" id="tab-n" role="tab" aria-selected="false">非機能要件</button>
+</div>
+<div class="toolbar">
+  <div class="search"><input id="q" type="search" placeholder="検索（名称・説明・出典・ID）" aria-label="要件を検索"></div>
+</div>
+<div class="chiprow" id="row-cat"><span class="rowlbl">カテゴリ</span></div>
+<div class="chiprow" id="row-mos"><span class="rowlbl">MoSCoW</span></div>
+<div class="chiprow" id="row-ph"><span class="rowlbl">フェーズ</span></div>
+<div class="count" id="count"></div>
+<div id="list"></div>
+<footer>本ビューアは docs/requirements/ の要件データから自動生成された単一HTMLファイルです（外部依存なし・ローカル動作）。フル構想版であり事業判断を意味しません。</footer>
+</div>
+<script>
+const DATA = {"meta":{"title":"AI採譜プロジェクト 要件一覧（フル構想版）","date":"2026-07-18","position":"本一覧はフル構想版であり、結論v5のNo-Go判定・4ゲート検証とは独立した構想ドキュメントである。事業推進の判断を意味しない。フェーズ列は「もし作るなら」の優先順位付けであり、Phase1=検証スパイク相当、Phase2=MVP、Phase3=将来構想を指す。","phases":{"P1":"Phase1 スパイク","P2":"Phase2 MVP","P3":"Phase3 将来構想"},"sources":"調査レポート16本+YouTube網羅調査(docs/research/)に基づく。出典のない数値・機能は記載していない。"},"functional":[{"id":"F-001","name":"音声ファイル入力","desc":"WAV/MP3/FLAC/M4A等の音声ファイルを取り込む。高音質(WAV)推奨の案内を表示","cat":"音声入力・前処理","moscow":"Must","phase":"P1","source":"YouTube調査(共有動画: WAV推奨)・全競合共通"},{"id":"F-002","name":"音質診断・警告","desc":"入力音源のビットレート・クリッピング・残響・ノイズを検出し、精度低下の警告と改善提案を表示","cat":"音声入力・前処理","moscow":"Should","phase":"P2","source":"YouTube調査(準備が最終精度の8割)"},{"id":"F-003","name":"ステム分離","desc":"ボーカル/ピアノ/ドラム/ベース/ギター/その他へのパート分離を採譜前の標準工程として内蔵","cat":"音声入力・前処理","moscow":"Must","phase":"P2","source":"YouTube調査(ゲームチェンジャー)・Moises・AudioJam"},{"id":"F-004","name":"長尺音源の自動分割","desc":"長い曲をセクション単位に自動分割して解析精度の低下を防ぐ","cat":"音声入力・前処理","moscow":"Should","phase":"P2","source":"YouTube調査(共有動画: クリップ分割)"},{"id":"F-005","name":"マイク/ライン録音入力","desc":"その場の演奏・鼻歌をマイクから直接採譜するクイックメモ機能","cat":"音声入力・前処理","moscow":"Could","phase":"P3","source":"ScoreCloud・Basic Pitch"},{"id":"F-006","name":"動画サイトURL直接入力","desc":"YouTube等のURL貼付による採譜。権利未処理音源の複製を事業者側が媒介する構造になるため対象外","cat":"音声入力・前処理","moscow":"Won't","phase":"P3","source":"Klangio/Songsterrは実装済みだがv5成果物非関与構造と衝突(G3法務判断事項)"},{"id":"F-007","name":"区間選択採譜","desc":"曲全体でなく指定区間だけを変換対象にする","cat":"音声入力・前処理","moscow":"Should","phase":"P2","source":"YouTube調査(AnthemScoreデモ)"},{"id":"F-008","name":"バッチ処理","desc":"複数ファイルの一括採譜キュー","cat":"音声入力・前処理","moscow":"Could","phase":"P3","source":"Klangio(バルク採譜)"},{"id":"F-009","name":"解析ヒント入力","desc":"テンポ・キー・楽器・拍子のヒントを事前指定して精度を上げるUI。質問が多い=制御が細かいと好評","cat":"音声入力・前処理","moscow":"Should","phase":"P2","source":"YouTube調査(Klangio英語圏レビュー)"},{"id":"F-010","name":"多重音高検出","desc":"和音・装飾音を含む音高検出。既存ツールでも比較的良好な領域のためOSS部品の活用を検討","cat":"解析エンジン","moscow":"Must","phase":"P1","source":"round1-web-competitors(Songscriptionはピッチ良好)"},{"id":"F-011","name":"オンセット/オフセット検出","desc":"音の開始・終了時刻の検出(Note F1/Onset F1評価の基礎)","cat":"解析エンジン","moscow":"Must","phase":"P1","source":"round1-codex-papers"},{"id":"F-012","name":"拍・小節推定","desc":"拍子変化・テンポ揺れに追従する拍/強拍推定。Beat This!(MIT)を第一候補に多段パイプラインの一段として実装","cat":"解析エンジン","moscow":"Must","phase":"P1","source":"round1-codex-papers(Beat This!/BeatNet+)"},{"id":"F-013","name":"キー/スケール推定","desc":"調の特定と転調検出。プロの耳コピワークフローの第1手順に対応","cat":"解析エンジン","moscow":"Must","phase":"P2","source":"YouTube調査(プロWF: まず調を掴む)"},{"id":"F-014","name":"コード進行解析","desc":"コード名・度数の自動解析。耳コピの中核工程であり単体でも価値がある層","cat":"解析エンジン","moscow":"Must","phase":"P2","source":"YouTube調査(プロWFの中核)・Chord Tracker・Moises"},{"id":"F-015","name":"楽器分類・パート識別","desc":"混合音源内の楽器を識別しパート別に扱う","cat":"解析エンジン","moscow":"Should","phase":"P2","source":"round1-web-competitors(Klangio 8楽器同時)"},{"id":"F-016","name":"強弱(ベロシティ)推定","desc":"打鍵強弱・音量変化を推定し譜面の強弱記号候補に反映","cat":"解析エンジン","moscow":"Could","phase":"P3","source":"YouTube調査(Prism/PianoTransの高評価点)"},{"id":"F-017","name":"テンポマップ生成","desc":"ルバート・テンポ揺れを追従するテンポマップ。既存ツール最大の崩壊点への対策","cat":"解析エンジン","moscow":"Should","phase":"P2","source":"YouTube調査(英語圏不満: ルバートで崩壊)"},{"id":"F-018","name":"ドラム採譜","desc":"ドラムキット別の自動採譜。3言語圏共通の空白領域","cat":"解析エンジン","moscow":"Could","phase":"P3","source":"YouTube調査(空白領域)"},{"id":"F-019","name":"多声部一括採譜","desc":"バンド/アンサンブルのフルスコア一括生成。全ツールで成功例ゼロの最難関領域","cat":"解析エンジン","moscow":"Could","phase":"P3","source":"YouTube調査(空白領域: 成功例ゼロ)"},{"id":"F-020","name":"歌声採譜・歌詞同期","desc":"ボーカル譜生成と歌詞の同期表示。英語圏では手薄な総合ソリューション","cat":"解析エンジン","moscow":"Could","phase":"P3","source":"YouTube調査(英語圏で手薄)"},{"id":"F-021","name":"リズム量子化","desc":"音価・休符・タイの決定(演奏MIDI→譜面)。本プロジェクトの勝負所。MIDI2ScoreTransformerはライセンス不明のため論文ベース独自実装","cat":"リズム・整譜","moscow":"Must","phase":"P1","source":"conclusions-v5(勝負所)・round1-codex-papers"},{"id":"F-022","name":"拍子整合チェック","desc":"無意味な拍子(4/4曲への11/8等)の出力を防ぐ小節整合検証。競合最大の弱点への直接対策","cat":"リズム・整譜","moscow":"Must","phase":"P1","source":"round1-web-competitors(Songscription弱点)"},{"id":"F-023","name":"声部分離・譜表割当","desc":"多声の声部分離と大譜表への割当(Piano_SVSep系GNN・MIT)","cat":"リズム・整譜","moscow":"Must","phase":"P2","source":"round1-codex-papers"},{"id":"F-024","name":"連桁・符尾の自動整理","desc":"小節をまたぐ連桁・タイ・連符の整理。人間の「最後の10%」を機械支援","cat":"リズム・整譜","moscow":"Must","phase":"P2","source":"YouTube調査(共有動画: 人手仕上げ領域)"},{"id":"F-025","name":"演奏可能性制約","desc":"演奏不能な過密音符・非現実的な譜面の抑制(最短音価制約・同時発音数制約)","cat":"リズム・整譜","moscow":"Must","phase":"P1","source":"YouTube調査(中国語圏「朗朗都弹不了」・日本語圏「エグイ譜面」)"},{"id":"F-026","name":"難易度別アレンジ","desc":"同じ曲を初級〜上級の難易度別譜面に変換(notation-to-notation)","cat":"リズム・整譜","moscow":"Could","phase":"P3","source":"round1-codex-papers(Gover/Suzuki)・Songscription Leveling"},{"id":"F-027","name":"ピアノリダクション","desc":"アンサンブル→ピアノ譜への縮約","cat":"リズム・整譜","moscow":"Could","phase":"P3","source":"round1-codex-papers"},{"id":"F-028","name":"運指・ポジション最適化","desc":"ギターTABの実演奏可能な押弦位置・運指の提案。既存ツールの頻出不満への対策","cat":"リズム・整譜","moscow":"Could","phase":"P3","source":"YouTube調査(英語圏不満: 非現実的運指)"},{"id":"F-029","name":"変則チューニング対応","desc":"ドロップD等の変則チューニングでの採譜・TAB生成。業界共通の最多要望機能","cat":"リズム・整譜","moscow":"Could","phase":"P3","source":"round1-web-competitors(最多要望・全社未対応)"},{"id":"F-030","name":"譜面整形(エングレービング)品質","desc":"改行・余白・段組の読みやすさ最適化。DAWスコア機能との決定的な差別化点","cat":"リズム・整譜","moscow":"Should","phase":"P2","source":"YouTube調査(日本語圏: 清書品質)"},{"id":"F-031","name":"五線譜","desc":"標準の五線譜表示・生成","cat":"記譜形式","moscow":"Must","phase":"P1","source":"全調査"},{"id":"F-032","name":"TAB譜","desc":"ギター/ベースのタブ譜生成","cat":"記譜形式","moscow":"Should","phase":"P2","source":"YouTube調査(ギター層の強い要求)"},{"id":"F-033","name":"简谱(数字譜)","desc":"中華圏標準の数字譜の表示・出力。西洋系ツールの明確な空白","cat":"記譜形式","moscow":"Could","phase":"P3","source":"YouTube調査(中華圏コメントで要求頻出)"},{"id":"F-034","name":"コード譜・リードシート","desc":"メロディ+コードのリードシート生成。Moises等が「コード提示止まり」の先を埋める","cat":"記譜形式","moscow":"Should","phase":"P2","source":"YouTube調査(日本語圏)・Klangio Melody Scanner"},{"id":"F-035","name":"sargam記譜","desc":"インド古典のsargam記譜出力。連続ピッチ曲線の内部表現が前提","cat":"記譜形式","moscow":"Could","phase":"P3","source":"round1-codex-papers(内部表現の注意)・round1-web-competitors(空白)"},{"id":"F-036","name":"ドラム譜","desc":"ドラム専用記譜","cat":"記譜形式","moscow":"Could","phase":"P3","source":"YouTube調査(空白領域)"},{"id":"F-037","name":"記譜形式の相互変換","desc":"五線譜⇄简谱⇄TABの変換。「MIDI转简谱」需要への対応","cat":"記譜形式","moscow":"Could","phase":"P3","source":"YouTube調査(中華圏: 専用動画が存在)"},{"id":"F-038","name":"下書き提示UX","desc":"AI出力を「完成譜」でなく「下書き」として提示する製品コンセプト。90対10の役割分担を明示","cat":"編集UI","moscow":"Must","phase":"P2","source":"YouTube調査(共有動画: 90対10の法則)"},{"id":"F-039","name":"楽譜エディタ","desc":"音符の追加/削除/移動/音価変更の直接編集","cat":"編集UI","moscow":"Must","phase":"P2","source":"Klangio Edit Mode・Songscription内蔵エディタ"},{"id":"F-040","name":"ピアノロール編集","desc":"ピアノロールでのMIDIレベル編集","cat":"編集UI","moscow":"Should","phase":"P2","source":"Songscription"},{"id":"F-041","name":"スペクトログラム表示","desc":"解析根拠のスペクトログラム可視化と誤検出の目視確認","cat":"編集UI","moscow":"Should","phase":"P2","source":"AnthemScore(定番機能)"},{"id":"F-042","name":"原音源同期再生","desc":"楽譜位置と原音源を同期再生し聴き比べ検証","cat":"編集UI","moscow":"Must","phase":"P2","source":"YouTube調査(検証ワークフロー)"},{"id":"F-043","name":"信頼度ハイライト","desc":"AIの確信が低い音符を色分けし「要確認箇所」を提示。下書きUXの中核","cat":"編集UI","moscow":"Should","phase":"P2","source":"独自(下書きUXの具体化)"},{"id":"F-044","name":"仕上げチェックリスト","desc":"連桁・休符・キー変化・強弱・スラーの人手確認を誘導するガイド","cat":"編集UI","moscow":"Could","phase":"P3","source":"YouTube調査(共有動画: 最後の10%)"},{"id":"F-045","name":"奏法記号・強弱の編集","desc":"スラー/スタッカート/強弱記号等の付与・編集。既存ツールが出力しない領域の人手補完を支援","cat":"編集UI","moscow":"Should","phase":"P2","source":"YouTube調査(英語圏不満: 奏法記号なし)"},{"id":"F-046","name":"アンドゥ・版管理","desc":"元に戻す/やり直しと編集履歴の版管理","cat":"編集UI","moscow":"Must","phase":"P2","source":"標準要件"},{"id":"F-047","name":"キーボード入力","desc":"英字ピッチ入力(C/D/E)・数字キー音価切替等の高速編集","cat":"編集UI","moscow":"Could","phase":"P3","source":"YouTube調査(楽譜ソフト比較の定番操作)"},{"id":"F-048","name":"MusicXMLエクスポート","desc":"MuseScore/Dorico等への受け渡し標準形式。ハブ疎結合戦略の要","cat":"出力・エクスポート","moscow":"Must","phase":"P1","source":"全調査・conclusions-v5(トレードオフ軸)"},{"id":"F-049","name":"MIDIエクスポート","desc":"DAW向けMIDI出力","cat":"出力・エクスポート","moscow":"Must","phase":"P1","source":"全調査"},{"id":"F-050","name":"PDF楽譜出力","desc":"印刷可能なPDF出力","cat":"出力・エクスポート","moscow":"Must","phase":"P2","source":"全競合共通"},{"id":"F-051","name":"Guitar Pro形式出力","desc":".gp形式でのTAB出力","cat":"出力・エクスポート","moscow":"Could","phase":"P3","source":"Klangio・Songsterr"},{"id":"F-052","name":"MusicXML妥当性検証","desc":"music21/Verovio等による出力の構文・記譜妥当性の自動検証","cat":"出力・エクスポート","moscow":"Must","phase":"P1","source":"round1-codex-papers(パイプライン第6段)"},{"id":"F-053","name":"印刷レイアウト調整","desc":"用紙サイズ・段数・パート抜き出しの印刷調整","cat":"出力・エクスポート","moscow":"Could","phase":"P3","source":"スコアメーカー系"},{"id":"F-054","name":"音声プレビュー出力","desc":"採譜結果のMIDI再生とMP3書き出し","cat":"出力・エクスポート","moscow":"Should","phase":"P2","source":"YouTube調査(日本語圏デモ)"},{"id":"F-055","name":"MuseScoreワンクリック連携","desc":"採譜結果をMuseScoreへ直接受け渡し。定番2ソフト連携ワークフローの摩擦を除去","cat":"外部連携","moscow":"Must","phase":"P2","source":"YouTube調査(AnthemScore→MuseScoreが定番)"},{"id":"F-056","name":"DAWプラグイン(VST3/AU)","desc":"DAW内でのaudio→MIDI変換プラグイン","cat":"外部連携","moscow":"Could","phase":"P3","source":"Klangio・Prism・Samplab"},{"id":"F-057","name":"API提供","desc":"外部開発者向け採譜API。成果物への関与度が上がるためG3法務判断を経て検討","cat":"外部連携","moscow":"Could","phase":"P3","source":"Klangio/Songscription Enterprise(法務判断事項)"},{"id":"F-058","name":"クラウド同期","desc":"マルチデバイスのプロジェクト同期。成果物非関与構造を保つ設計が前提","cat":"外部連携","moscow":"Could","phase":"P3","source":"Moises(PC/iOS/Android同期)・法務制約あり"},{"id":"F-059","name":"テンポ変更再生","desc":"ピッチ維持での減速再生(耳コピ/練習の定番)","cat":"練習支援・付加価値","moscow":"Should","phase":"P2","source":"Transcribe!・Moises"},{"id":"F-060","name":"キー変更・移調","desc":"移調再生と移調譜の生成","cat":"練習支援・付加価値","moscow":"Should","phase":"P2","source":"Moises"},{"id":"F-061","name":"区間ループ再生","desc":"Aメロ/サビ等の区間リピート練習","cat":"練習支援・付加価値","moscow":"Should","phase":"P2","source":"Moises"},{"id":"F-062","name":"スマートメトロノーム","desc":"曲のテンポマップに追従するメトロノーム","cat":"練習支援・付加価値","moscow":"Could","phase":"P3","source":"Moises"},{"id":"F-063","name":"パート別ソロ/ミュート","desc":"分離パートの個別再生・音量調整","cat":"練習支援・付加価値","moscow":"Should","phase":"P2","source":"Moises・AudioJam"},{"id":"F-064","name":"耳コピ学習モード","desc":"答えを段階開示して聴音を訓練するモード。「AIが学習を奪う」批判への応答であり最大の関心層(耳を鍛える)への接続","cat":"練習支援・付加価値","moscow":"Could","phase":"P3","source":"YouTube調査(手動耳コピ講座1,142万再生・教育者批判)"},{"id":"F-065","name":"採譜ワークフローガイド","desc":"準備→選択→生成→仕上げの4ステップを製品内で誘導","cat":"練習支援・付加価値","moscow":"Could","phase":"P3","source":"YouTube調査(共有動画の黄金律)"},{"id":"F-066","name":"完全ローカル処理モード","desc":"音源を外部送信せず端末内で全処理を完結。成果物非関与構造の技術基盤","cat":"運用・その他","moscow":"Must","phase":"P1","source":"conclusions-v5(必須条件)・AnthemScore(オフライン支持)"},{"id":"F-067","name":"処理進捗と処理速度","desc":"進捗表示と実用的な処理速度(競合は10分待ちに不満、30秒訴求も)","cat":"運用・その他","moscow":"Should","phase":"P2","source":"YouTube調査(Klangio処理時間不満)"},{"id":"F-068","name":"日本語UI","desc":"日本語ネイティブのUI・用語。英語UI不満(中華圏で顕著)への対応と堀T4の一部","cat":"運用・その他","moscow":"Must","phase":"P2","source":"YouTube調査(中華圏の英語UI不満)・conclusions-v5(軸T4)"},{"id":"F-069","name":"多言語UI","desc":"英語・中国語UI(简谱対応と併せた中華圏展開の前提)","cat":"運用・その他","moscow":"Could","phase":"P3","source":"YouTube調査(中華圏)"},{"id":"F-070","name":"透明な課金・解約UX","desc":"解約導線の明示・自動更新前通知・返金ポリシー明示。Klangioの構造的弱点(想定外請求)との差別化","cat":"運用・その他","moscow":"Must","phase":"P2","source":"round1-web-competitors(Trustpilot不満)"},{"id":"F-071","name":"無料試用","desc":"プレビュー制限方式の無料枠。中華圏では無料版が拡散の主動線","cat":"運用・その他","moscow":"Should","phase":"P2","source":"競合共通(20秒プレビュー)・YouTube調査(中華圏)"},{"id":"F-072","name":"買い切り+サブスク並走","desc":"デスクトップ買い切りとサブスクの並走提供。業界標準であり中華圏のサブスク抵抗にも対応","cat":"運用・その他","moscow":"Should","phase":"P3","source":"round2-web-bizmodel(AnthemScore/カワイ実例)"},{"id":"F-073","name":"権利ガイダンス表示","desc":"私的複製の範囲・配布/販売時の許諾必要性をユーザーに明示する啓発UI","cat":"運用・その他","moscow":"Must","phase":"P2","source":"round1法務調査(AudioScore方式のユーザー責任明確化)"},{"id":"F-074","name":"データ収集オプトイン設計","desc":"音源・成果物を既定で収集しない。AI学習利用は明示オプトイン","cat":"運用・その他","moscow":"Should","phase":"P2","source":"Songscription(学習オプトアウト)・成果物非関与"},{"id":"F-075","name":"モデル更新配信","desc":"ローカルモデルの差し替え配信とバージョン管理","cat":"運用・その他","moscow":"Should","phase":"P3","source":"モデル運用要件"}],"nonfunctional":[{"id":"NF-001","name":"オフライン完全動作","desc":"ネットワーク切断時も採譜・編集・出力の全コア機能が動作する","cat":"可用性","moscow":"Must","metric":"コア機能のオフライン動作率100%","source":"conclusions-v5(成果物非関与)・AnthemScore買切支持"},{"id":"NF-002","name":"作業の自動保存","desc":"編集内容の自動保存とクラッシュ後の復元","cat":"可用性","moscow":"Should","metric":"クラッシュ時の作業損失≤直近1分(仮)","source":"標準要件"},{"id":"NF-003","name":"長時間処理の中断再開","desc":"解析処理の中断・再開が可能","cat":"可用性","moscow":"Could","metric":"—","source":"標準要件"},{"id":"NF-004","name":"採譜処理時間","desc":"一般消費者PC(GPU非必須)で実用的な処理時間。競合は10分待ちで不満、30秒訴求例あり","cat":"性能・拡張性","moscow":"Should","metric":"3分楽曲を5分以内(仮。G1実測後に確定)","source":"YouTube調査(Klangio不満)"},{"id":"NF-005","name":"メモリ使用量","desc":"一般PC(16GB RAM)で動作","cat":"性能・拡張性","moscow":"Should","metric":"ピークメモリ≤8GB(仮)","source":"標準要件"},{"id":"NF-006","name":"対応楽曲長","desc":"1曲あたりの最大処理時間長","cat":"性能・拡張性","moscow":"Could","metric":"最大15分(仮。Songscription上限に準拠)","source":"round1-web-competitors"},{"id":"NF-007","name":"エンジン部品の交換可能性","desc":"多段パイプライン(音符抽出→拍推定→量子化→声部→出力)の各段を差し替え可能に抽象化","cat":"性能・拡張性","moscow":"Should","metric":"各段がインターフェース分離されている","source":"round1-codex-papers(多段構成推奨)"},{"id":"NF-008","name":"中間出力の検査可能性","desc":"パイプライン各段の中間出力(MIDI・拍グリッド等)を保存・検査できる","cat":"運用・保守性","moscow":"Should","metric":"全段の中間出力をエクスポート可能","source":"round1-codex-papers(評価・デバッグ)"},{"id":"NF-009","name":"ログのプライバシー","desc":"ログ・診断情報に音源内容・採譜結果を含めない","cat":"運用・保守性","moscow":"Must","metric":"ログ内の音源由来データ0件","source":"成果物非関与構造"},{"id":"NF-010","name":"更新とロールバック","desc":"アプリ/モデルの自動更新と旧版への復帰手段","cat":"運用・保守性","moscow":"Could","metric":"—","source":"標準要件"},{"id":"NF-011","name":"MusicXML標準準拠","desc":"出力が主要楽譜ソフト(MuseScore/Dorico/Sibelius)で警告なく開ける互換性。Finale終了で移行不安が顕在化した教訓","cat":"移行性","moscow":"Must","metric":"music21/Verovio検証パス100%・主要3ソフトで開封確認","source":"YouTube調査(Finale終了の移行不安)・round1-codex-papers"},{"id":"NF-012","name":"プロジェクト前方互換","desc":"新版アプリで旧版プロジェクトファイルが開ける","cat":"移行性","moscow":"Could","metric":"—","source":"標準要件"},{"id":"NF-013","name":"外部送信なしの既定","desc":"音源・成果物は既定で外部送信しない。送信を伴う機能は明示同意制","cat":"セキュリティ","moscow":"Must","metric":"既定設定での外部送信0件","source":"conclusions-v5(成果物非関与)"},{"id":"NF-014","name":"コード署名・公証","desc":"macOS notarization / Windowsコード署名による配布","cat":"セキュリティ","moscow":"Should","metric":"全配布物が署名済み","source":"配布要件"},{"id":"NF-015","name":"依存の脆弱性管理","desc":"依存ライブラリの脆弱性スキャンと更新運用","cat":"セキュリティ","moscow":"Should","metric":"既知Critical脆弱性0件でリリース","source":"標準要件"},{"id":"NF-016","name":"対応OS","desc":"Windows/macOS対応(Linuxは検討)","cat":"システム環境","moscow":"Should","metric":"Win10+/macOS 13+(仮)","source":"AnthemScore(3OS対応)"},{"id":"NF-017","name":"GPU任意","desc":"CPUのみで全機能動作、GPU搭載時は高速化","cat":"システム環境","moscow":"Should","metric":"CPU単独での全機能動作","source":"一般PC前提"},{"id":"NF-018","name":"手直し比率KPI","desc":"フル耳コピ比の手直し工数比率を主要品質KPIとする。目標値はG1ベンチのアンカリング後に設定(未実測のため現時点で数値は置かない)","cat":"採譜品質","moscow":"Must","metric":"G1実測アンカリング後に帯境界として封緘","source":"gate-execution-spec"},{"id":"NF-019","name":"標準評価指標セット","desc":"Note F1 / Onset・Offset F1 / beat・downbeat F1 / MUSTER / MV2H / MusicXML validity / 人間評価の複合評価","cat":"採譜品質","moscow":"Must","metric":"リリース毎に全指標を計測・記録","source":"round1-codex-papers(推奨セット)"},{"id":"NF-020","name":"独自品質指標","desc":"小節拍数整合・タイ/休符過剰・譜表跨ぎ・最短音価過密度・演奏難易度の独自指標化","cat":"採譜品質","moscow":"Should","metric":"全指標の自動計測を実装","source":"round1-codex-papers"},{"id":"NF-021","name":"回帰評価CI","desc":"モデル/エンジン更新時にベンチ曲セットで自動回帰評価","cat":"採譜品質","moscow":"Should","metric":"更新毎のベンチ自動実行・悪化検知","source":"EDD方針・gate-execution-spec(曲ID台帳)"},{"id":"NF-022","name":"拍子妥当性ゲート","desc":"無意味な拍子の出力(4/4曲への11/8等)を品質ゲートで検出・抑制","cat":"採譜品質","moscow":"Must","metric":"ベンチ曲での拍子誤り率を計測(目標値は実測後設定)","source":"round1-web-competitors(Songscription弱点)"},{"id":"NF-023","name":"成果物非関与構造","desc":"事業者が採譜成果物の生成・修正・納品に関与しないアーキテクチャ(ソフトウェア提供のみ)","cat":"法務・コンプライアンス","moscow":"Must","metric":"成果物がユーザー端末外に出ない構造の維持","source":"conclusions-v5(必須条件1)"},{"id":"NF-024","name":"私的複製整合設計","desc":"ユーザー持込音源のプライベート処理という文化庁平成27年報告書タイプ2整理に整合する設計を維持","cat":"法務・コンプライアンス","moscow":"Must","metric":"G3弁護士確認の回答に整合","source":"round1-legal-shiteki-fukusei"},{"id":"NF-025","name":"学習データのライセンスクリーン","desc":"CC BY-NC系データ(Saraga等)を商用学習に使わない。合成データ中心の学習戦略","cat":"法務・コンプライアンス","moscow":"Must","metric":"学習データ台帳で全ソースのライセンス確認済み","source":"Issue #9・round1-codex-papers(ライセンス表)"},{"id":"NF-026","name":"コピーレフト部品の分離","desc":"GPL部品(YourMT3等)の静的組込を回避。ライセンス不明部品(MIDI2ScoreTransformer)は不使用・論文ベース独自実装","cat":"法務・コンプライアンス","moscow":"Must","metric":"配布物の依存ライセンス監査パス","source":"round1-codex-papers(ライセンス表)"},{"id":"NF-027","name":"法務確認のリリース前提","desc":"G3弁護士4問の回答を設計に反映してから公開リリース","cat":"法務・コンプライアンス","moscow":"Must","metric":"4問の回答と設計対応表の作成","source":"conclusions-v5(G3)"},{"id":"NF-028","name":"利用規約の権利明確化","desc":"採譜結果の利用責任(私的利用の範囲・配布時の許諾)を利用規約で明確化","cat":"法務・コンプライアンス","moscow":"Should","metric":"規約に権利条項を明記・G3確認済み","source":"round1法務調査(AudioScore方式)"},{"id":"NF-029","name":"モデル・部品のライセンス台帳","desc":"エンジン部品ごとの出所・ライセンス・商用可否を台帳管理","cat":"モデル運用","moscow":"Must","metric":"全部品が台帳に記録され監査可能","source":"round1-codex-papers(ライセンス表)"},{"id":"NF-030","name":"配布モデルサイズ","desc":"オンデバイスモデルの配布可能なサイズ上限","cat":"モデル運用","moscow":"Could","metric":"数GB以内(仮)","source":"配布要件"},{"id":"NF-031","name":"学習の再現性","desc":"合成データ生成と学習パイプラインのバージョン管理・再現可能性","cat":"モデル運用","moscow":"Should","metric":"任意の配布モデルを再学習で再現可能","source":"EDD方針"}]};
+const PH = DATA.meta.phases;
+let tab = "f", q = "", selCat = null, selMos = null, selPh = null;
+document.getElementById("position").textContent = DATA.meta.position;
+
+function items(){ return tab === "f" ? DATA.functional : DATA.nonfunctional; }
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function mosClass(m){ return "b-" + m.replace("'",""); }
+
+function renderCards(){
+  const f = DATA.functional, n = DATA.nonfunctional;
+  const musts = f.concat(n).filter(x=>x.moscow==="Must").length;
+  const p1 = f.filter(x=>x.phase==="P1").length;
+  document.getElementById("cards").innerHTML =
+    card(f.length,"機能要件","acc") + card(n.length,"非機能要件","acc") +
+    card(musts,"Must（必須）","") + card(p1, PH.P1+" 対象","");
+  function card(num,lbl,cls){ return `<div class="card ${cls}"><div class="num">${num}</div><div class="lbl">${lbl}</div></div>`; }
+}
+
+function chips(rowId, values, sel, onpick){
+  const row = document.getElementById(rowId);
+  row.querySelectorAll(".chip").forEach(c=>c.remove());
+  const all = document.createElement("button");
+  all.className = "chip" + (sel===null ? " on":""); all.textContent = "すべて";
+  all.onclick = ()=>onpick(null); row.appendChild(all);
+  values.forEach(v=>{
+    const b = document.createElement("button");
+    b.className = "chip" + (sel===v ? " on":"");
+    b.textContent = rowId==="row-ph" ? PH[v] : v;
+    b.onclick = ()=>onpick(sel===v ? null : v);
+    row.appendChild(b);
+  });
+}
+
+function render(){
+  renderCards();
+  const its = items();
+  chips("row-cat", [...new Set(its.map(x=>x.cat))], selCat, v=>{selCat=v;render();});
+  chips("row-mos", [...new Set(its.map(x=>x.moscow))], selMos, v=>{selMos=v;render();});
+  document.getElementById("row-ph").style.display = tab==="f" ? "" : "none";
+  if(tab==="f") chips("row-ph", ["P1","P2","P3"], selPh, v=>{selPh=v;render();});
+  const ql = q.toLowerCase();
+  const hit = its.filter(x=>
+    (selCat===null || x.cat===selCat) &&
+    (selMos===null || x.moscow===selMos) &&
+    (tab!=="f" || selPh===null || x.phase===selPh) &&
+    (ql==="" || (x.id+x.name+x.desc+x.source+(x.metric||"")).toLowerCase().includes(ql))
+  );
+  document.getElementById("count").textContent = `${hit.length} / ${its.length} 件を表示`;
+  const byCat = {};
+  hit.forEach(x=>{ (byCat[x.cat] = byCat[x.cat]||[]).push(x); });
+  let html = "";
+  for(const cat of Object.keys(byCat)){
+    html += `<div class="catblock"><h2>${esc(cat)} <span class="n">${byCat[cat].length}件</span></h2>`;
+    for(const x of byCat[cat]){
+      html += `<div class="req"><div class="id">${x.id}</div><div class="body"><div class="nm">${esc(x.name)}</div><div class="ds">${esc(x.desc)}</div>`;
+      if(x.metric && x.metric!=="—") html += `<span class="metric">${esc(x.metric)}</span>`;
+      html += `<div class="src">${esc(x.source)}</div></div><div class="badges"><span class="bdg ${mosClass(x.moscow)}">${x.moscow}</span>`;
+      if(x.phase) html += `<span class="bdg b-${x.phase}">${PH[x.phase]}</span>`;
+      html += `</div></div>`;
+    }
+    html += `</div>`;
+  }
+  document.getElementById("list").innerHTML = html || `<div class="empty">条件に一致する要件がありません</div>`;
+}
+
+document.getElementById("q").addEventListener("input", e=>{ q=e.target.value; render(); });
+document.getElementById("tab-f").onclick = ()=>{ tab="f"; selCat=selMos=selPh=null; setTab(); };
+document.getElementById("tab-n").onclick = ()=>{ tab="n"; selCat=selMos=selPh=null; setTab(); };
+function setTab(){
+  document.getElementById("tab-f").classList.toggle("active", tab==="f");
+  document.getElementById("tab-n").classList.toggle("active", tab==="n");
+  document.getElementById("tab-f").setAttribute("aria-selected", tab==="f");
+  document.getElementById("tab-n").setAttribute("aria-selected", tab==="n");
+  render();
+}
+render();
+</script>
+</body>
+</html>
