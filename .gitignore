@@ -3,3 +3,4 @@ docs/research/.*.log
 tools/ai-ears/.venv/
 tools/ai-ears/testdata/
 tools/ai-ears/__pycache__/
+tools/ai-ears/.venv312/
