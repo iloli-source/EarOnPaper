@@ -155,5 +155,53 @@ def main():
     print("saved results.json")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and "--score-rhythm" not in sys.argv:
     main()
+
+
+def main_score_rhythm():
+    """キャッシュ済み bench_out の出力に対して楽譜レベルKPI(score_rhythm)を再評価する。
+
+    使い方: python bench_pd.py --score-rhythm  (要: 既存の bench_out/*.mid)
+    """
+    sys.path.insert(0, str(ROOT / "tools" / "ai-ears"))
+    from score_metrics import score_rhythm_paths
+
+    rows = []
+    for rel, slug, cat in SONGS:
+        gt_path = CORPUS / f"{rel}.mid"
+        bp_mid = OUT / f"{slug}_bp.mid"
+        spike_mid = OUT / f"{slug}_spike.mid"
+        if not (gt_path.exists() and bp_mid.exists() and spike_mid.exists()):
+            rows.append({"slug": slug, "cat": cat, "status": "cache missing"})
+            continue
+        bp = score_rhythm_paths(gt_path, bp_mid)
+        sp = score_rhythm_paths(gt_path, spike_mid)
+        rows.append({
+            "slug": slug, "cat": cat, "status": "ok",
+            "bp_total": bp["total"], "bp_f1": bp["beat_f1"], "bp_dur": bp["dur_agreement"],
+            "sp_total": sp["total"], "sp_f1": sp["beat_f1"], "sp_dur": sp["dur_agreement"],
+            "delta": round(sp["total"] - bp["total"], 4),
+        })
+    ok = [r for r in rows if r["status"] == "ok"]
+    if ok:
+        avg_bp = sum(r["bp_total"] for r in ok) / len(ok)
+        avg_sp = sum(r["sp_total"] for r in ok) / len(ok)
+        wins = sum(1 for r in ok if r["delta"] > 0.005)
+        ties = sum(1 for r in ok if abs(r["delta"]) <= 0.005)
+        print(f"# score_rhythm 再評価 (n={len(ok)})")
+        print(f"平均: BP素点={avg_bp:.3f} / 自社spike={avg_sp:.3f} / Δ={avg_sp-avg_bp:+.3f}")
+        print(f"勝敗: spike改善 {wins} / 同点 {ties} / 劣後 {len(ok)-wins-ties}")
+        print()
+        print("| 曲 | 分類 | BP total(f1/dur) | spike total(f1/dur) | Δ |")
+        print("|---|---|---|---|---|")
+        for r in ok:
+            print(f"| {r['slug']} | {r['cat']} | {r['bp_total']:.3f} ({r['bp_f1']:.2f}/{r['bp_dur']:.2f}) | {r['sp_total']:.3f} ({r['sp_f1']:.2f}/{r['sp_dur']:.2f}) | {r['delta']:+.3f} |")
+    for r in rows:
+        if r["status"] != "ok":
+            print(f"| {r['slug']} | {r['cat']} | {r['status']} | | |")
+
+
+if __name__ == "__main__" and "--score-rhythm" in sys.argv:
+    main_score_rhythm()
+    sys.exit(0)

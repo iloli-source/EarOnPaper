@@ -10,7 +10,18 @@ BPM_MIN = 60.0
 BPM_MAX = 180.0
 BPM_DEFAULT = 120.0
 GRID_PER_BEAT = 4        # 16分格子
-ERR_TOLERANCE_SEC = 0.005  # 最良誤差との許容差(秒)。同点なら遅いテンポを選ぶ
+
+# --- テンポ推定のパラメータ(Issue #34) ---
+CLUSTER_WINDOW_SEC = 0.035   # 和音の弾きばらつきを1オンセットに束ねる窓
+CONFIDENCE_FLOOR = 0.6       # 幽霊除けの信頼度下限(高信頼が十分残る場合のみ適用)
+MIN_HI_CONF_EVENTS = 8       # 高信頼イベントがこの数以上なら低信頼を捨てる
+IOI_MIN_SEC = 0.06           # これ未満の間隔はノイズ(クラスタ残渣)
+IOI_MAX_SEC = 2.5            # これ超の間隔は休符跨ぎとして無視
+FIT_BAND = 0.03              # 最良フィットとの許容差(この帯内を同点候補とみなす)
+MIN_FIT = 0.35               # 全候補がこれ未満=格子で説明できない→デフォルトへ退避
+PRIOR_CENTER_BPM = 108.0     # 音楽的テンポの事前分布中心(緩いガウス・log2空間)
+PRIOR_SIGMA_LOG2 = 0.7
+SUBDIV_SIGMA_LOG2 = 0.5
 
 
 @dataclass(frozen=True)
@@ -23,34 +34,87 @@ class QuantizedNote:
     confidence: float
 
 
+def _cluster_onsets(events: list[PitchEvent]) -> list[float]:
+    """近接オンセット(和音の弾きばらつき)を1つの代表時刻に束ねる。"""
+    onsets = sorted(e.onset for e in events)
+    clusters: list[list[float]] = []
+    for t in onsets:
+        if clusters and t - clusters[-1][-1] <= CLUSTER_WINDOW_SEC:
+            clusters[-1].append(t)
+        else:
+            clusters.append([t])
+    return [float(np.mean(c)) for c in clusters]
+
+
+def _grid_fit(iois: np.ndarray, bpm: float) -> float:
+    """IOI列が16分格子で説明できる度合い(0-1の無次元スコア)。
+
+    格子ずれの平均を「ランダムなら grid/4 になる」期待値で正規化する。
+    秒単位の生誤差と違い、細かい格子(速いテンポ)が自動的に有利にならない
+    — これが旧実装の145-150固着(幽霊混入時)の根治。
+    """
+    grid = 60.0 / bpm / GRID_PER_BEAT
+    x = iois / grid
+    dev = float(np.mean(np.abs(x - np.round(x))))  # 0(完全)〜0.25(ランダム期待値)
+    return max(0.0, 1.0 - 4.0 * dev)
+
+
+def _log2_gauss(x: float, center: float, sigma: float) -> float:
+    d = np.log2(x / center)
+    return float(np.exp(-(d * d) / (2.0 * sigma * sigma)))
+
+
 def estimate_tempo(
     events: list[PitchEvent],
     bpm_min: float = BPM_MIN,
     bpm_max: float = BPM_MAX,
 ) -> float:
-    """オンセット列が16分格子に最もよく乗るテンポを探索する。
+    """オンセット間隔(IOI)が16分格子に乗るテンポを、頑健化つきで推定する。
 
-    誤差は秒単位で測る(格子単位だと粗い格子=遅いテンポほど見かけ上有利になるため)。
-    テンポの整数倍(倍取り)も格子に乗るため、誤差が同水準なら最も遅い
-    候補(=最も粗い格子で説明できるテンポ)を採用する。
+    旧実装の欠陥(Issue #34): 幽霊オンセット混入時に誤差が速いテンポほど単調に
+    小さくなり、真のテンポと無関係に145-150帯へ固着。和音の非同時性で倍半誤りも発生。
+
+    対策の三段構え:
+    1. 幽霊除け: 高信頼イベントが十分あれば低信頼(confidence<0.6)を捨てる
+    2. 和音束ね: 近接オンセットをクラスタ化し、IOIベースの無次元フィットで
+       「細かい格子ほど有利」のバイアスを除去。説明できない場合はデフォルトへ退避
+    3. 倍半処理: フィット同点帯の候補から、中央値IOIの音価妥当性(8分/4分を優先)
+       と音楽的テンポ事前分布(log2ガウス)の積で選択
+
+    限界: 一定テンポを仮定する。ルバート・テンポ変化曲は範囲外(READMEに記録)。
     """
-    onsets = sorted(e.onset for e in events)
-    if len(onsets) < 3:
+    hi = [e for e in events if e.confidence >= CONFIDENCE_FLOOR]
+    use = hi if len(hi) >= MIN_HI_CONF_EVENTS else events
+
+    times = _cluster_onsets(use)
+    if len(times) < 3:
         return BPM_DEFAULT
-    rel = np.asarray(onsets) - onsets[0]
+    diffs = np.diff(np.asarray(times))
+    iois = diffs[(diffs >= IOI_MIN_SEC) & (diffs <= IOI_MAX_SEC)]
+    if len(iois) < 2:
+        return BPM_DEFAULT
 
-    candidates: list[tuple[float, float]] = []
-    for bpm in np.arange(bpm_min, bpm_max + 0.25, 0.5):
-        grid = 60.0 / bpm / GRID_PER_BEAT
-        pos = rel / grid
-        err_sec = float(np.mean(np.abs(pos - np.round(pos)) * grid))
-        candidates.append((err_sec, float(bpm)))
+    bpms = np.arange(bpm_min, bpm_max + 0.25, 0.5)
+    fits = {float(b): _grid_fit(iois, float(b)) for b in bpms}
+    best_fit = max(fits.values())
+    if best_fit < MIN_FIT:
+        return BPM_DEFAULT  # 格子で説明できない(幽霊の嵐等)→固着せず退避
 
-    min_err = min(err for err, _ in candidates)
-    for err, bpm in sorted(candidates, key=lambda c: c[1]):  # 遅いテンポ優先
-        if err <= min_err + ERR_TOLERANCE_SEC:
-            return bpm
-    return BPM_DEFAULT
+    med_ioi = float(np.median(iois))
+    band = [b for b, f in fits.items() if f >= best_fit - FIT_BAND]
+
+    def total_score(bpm: float) -> float:
+        spb = 60.0 / bpm
+        ratio = med_ioi / spb  # 中央値IOIが何拍分か
+        # 8分(0.5拍)・4分(1.0拍)を最尤の音価と見なす緩い事前分布
+        subdiv = max(
+            _log2_gauss(ratio, 0.5, SUBDIV_SIGMA_LOG2),
+            _log2_gauss(ratio, 1.0, SUBDIV_SIGMA_LOG2),
+        )
+        prior = _log2_gauss(bpm, PRIOR_CENTER_BPM, PRIOR_SIGMA_LOG2)
+        return fits[bpm] * subdiv * prior
+
+    return max(band, key=total_score)
 
 
 def quantize_events(
