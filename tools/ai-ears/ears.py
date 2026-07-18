@@ -180,14 +180,19 @@ def score_health(pm, notes) -> dict:
         issues.append(f"楽器の音域外の音符が{out_of_range:.0%}")
 
     # 3) 同時発音の異常な密度(1秒窓での平均同時ノート数)
+    density_penalty = 0.0
     if len(notes) > 1:
         total = max(ends.max() - starts.min(), 1e-6)
         density = len(notes) / total
         if density > 25:
             issues.append(f"音符密度が異常({density:.0f}個/秒) — 幽霊音符の疑い")
+            # 指摘だけでなく減点にも反映する(テストで発見したバグの修正 2026-07-19:
+            # 旧実装は密度を指摘に載せるのみでスコアに反映せず、密なゴミ出力が高得点になり得た)
+            density_penalty = min(0.6, 0.4 + (density - 25) / 100)
     # 4) 長い無音への音符配置は compare 側でしか判定できないため対象外(README参照)
 
-    penalty = min(1.0, too_short * 2 + out_of_range * 3 + (0.3 if len(issues) >= 3 else 0.0))
+    penalty = min(1.0, too_short * 2 + out_of_range * 3 + density_penalty
+                  + (0.3 if len(issues) >= 3 else 0.0))
     score = float(np.clip(1.0 - penalty, 0.0, 1.0))
     return {
         "score": round(score, 4),

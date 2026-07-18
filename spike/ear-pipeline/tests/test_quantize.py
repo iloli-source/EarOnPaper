@@ -2,7 +2,8 @@
 
 from earpipe.ear import PitchEvent
 from earpipe.quantize import estimate_tempo, quantize_events
-from tests.conftest import MELODY_SIMPLE, MELODY_DOTTED
+
+from tests.conftest import MELODY_DOTTED, MELODY_SIMPLE
 
 
 def events_from_melody(melody, bpm, jitter=0.0):

@@ -15,7 +15,6 @@ import argparse
 import base64
 import json
 import pathlib
-import sys
 import tempfile
 import urllib.error
 import urllib.request

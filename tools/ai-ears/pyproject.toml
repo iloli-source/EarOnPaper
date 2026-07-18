@@ -1,0 +1,31 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: 単体テスト",
+    "integration: CLI等の統合テスト",
+]
+
+[tool.coverage.run]
+# 対象は審判本体の ears.py。
+# gemini_ears.py は外部API(Gemini)依存のため対象外 — 純粋関数部(load_key/to_wav_bytes/PROMPT)は
+# tests/test_cli.py でテストするが、judge/main はクォータ・ネットワーク依存でCI再現性がないため
+# カバレッジゲートから除外する(理由記録)。実動確認は Issue #23 で実施。
+# synth_test.py はテスト用fixture生成モジュールのため対象外。
+source = ["ears"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "if __name__ == .__main__.:",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+# 最小構成: pycodestyle/pyflakes + import整理
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",  # 日本語コメント・説明文で行長超過が多いため(表示上の問題なし)
+]

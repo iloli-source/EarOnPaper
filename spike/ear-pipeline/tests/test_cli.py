@@ -3,7 +3,6 @@
 import json
 
 import music21
-
 from earpipe.pipeline import main
 
 

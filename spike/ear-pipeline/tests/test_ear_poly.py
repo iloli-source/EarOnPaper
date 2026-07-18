@@ -2,10 +2,10 @@
 
 import music21
 import pytest
-
 from earpipe.ear_poly import bp_python_path, detect_events_poly
 from earpipe.pipeline import transcribe_file
-from tests.conftest import CHORDS_PROG, chords_to_seconds, note_f1
+
+from tests.conftest import chords_to_seconds, note_f1
 
 pytestmark = pytest.mark.skipif(
     bp_python_path() is None,

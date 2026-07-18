@@ -1,10 +1,8 @@
 """記譜層（music21 → 五線譜MusicXML/MIDI）のユニットテスト。"""
 
 import music21
-import pytest
-
+from earpipe.notate import to_score, write_midi, write_musicxml
 from earpipe.quantize import QuantizedNote
-from earpipe.notate import to_score, write_musicxml, write_midi
 
 NOTES = [
     QuantizedNote(start_beats=0.0, dur_beats=1.0, midi=60, confidence=0.9),

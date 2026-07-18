@@ -1,9 +1,9 @@
 """耳層（音→音程イベント）のユニットテスト。pYIN単音フォールバック実装を検証。"""
 
 import soundfile as sf
-
 from earpipe.ear import detect_events
-from tests.conftest import MELODY_SIMPLE, melody_to_seconds, note_f1
+
+from tests.conftest import melody_to_seconds, note_f1
 
 
 class TestDetectEvents:

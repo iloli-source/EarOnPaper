@@ -2,8 +2,8 @@
 
 import music21
 import pytest
-
 from earpipe.pipeline import transcribe_file
+
 from tests.conftest import melody_to_seconds, note_f1
 
 
