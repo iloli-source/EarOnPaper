@@ -1,2 +1,5 @@
 docs/research/.*.log
 .DS_Store
+tools/ai-ears/.venv/
+tools/ai-ears/testdata/
+tools/ai-ears/__pycache__/
