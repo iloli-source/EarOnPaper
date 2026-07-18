@@ -54,14 +54,14 @@ class TestEndToEnd:
 
 
 class TestNegative:
-    def test_silence_zero_notes(self, silence_wav, tmp_path):
+    def test_silence_zero_notes(self, silence_wav_path, tmp_path):
         out = tmp_path / "silence.musicxml"
-        result = transcribe_file(silence_wav, out_musicxml=out)
+        result = transcribe_file(silence_wav_path, out_musicxml=out)
         assert result["n_notes"] == 0
         reparsed = music21.converter.parse(str(out))
         assert len(list(reparsed.recurse().notes)) == 0
 
-    def test_noise_zero_notes(self, noise_wav, tmp_path):
+    def test_noise_zero_notes(self, noise_wav_path, tmp_path):
         out = tmp_path / "noise.musicxml"
-        result = transcribe_file(noise_wav, out_musicxml=out)
+        result = transcribe_file(noise_wav_path, out_musicxml=out)
         assert result["n_notes"] == 0

@@ -114,7 +114,8 @@ def dotted_wav(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def silence_wav(tmp_path_factory):
+def silence_wav_path(tmp_path_factory):
+    """Pathのみを返す(メロディ系fixtureと違いground truthがないため。命名で非対称を明示)。"""
     import soundfile as sf
     path = tmp_path_factory.mktemp("audio") / "silence.wav"
     sf.write(path, np.zeros(SR * 3, dtype=np.float32), SR)
@@ -122,7 +123,8 @@ def silence_wav(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def noise_wav(tmp_path_factory):
+def noise_wav_path(tmp_path_factory):
+    """Pathのみを返す(ground truthなし。命名で非対称を明示)。"""
     import soundfile as sf
     rng = np.random.default_rng(42)
     path = tmp_path_factory.mktemp("audio") / "noise.wav"

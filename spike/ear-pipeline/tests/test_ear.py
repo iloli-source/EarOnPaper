@@ -23,11 +23,11 @@ class TestDetectEvents:
             assert 0.0 <= e.confidence <= 1.0
             assert e.offset > e.onset
 
-    def test_silence_yields_no_events(self, silence_wav):
-        y, sr = sf.read(silence_wav)
+    def test_silence_yields_no_events(self, silence_wav_path):
+        y, sr = sf.read(silence_wav_path)
         assert detect_events(y, sr) == []
 
-    def test_noise_yields_no_events(self, noise_wav):
-        y, sr = sf.read(noise_wav)
+    def test_noise_yields_no_events(self, noise_wav_path):
+        y, sr = sf.read(noise_wav_path)
         events = detect_events(y, sr)
         assert events == [], f"noise produced {len(events)} spurious events"

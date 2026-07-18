@@ -29,8 +29,23 @@ def bp_python_path() -> str | None:
     return None
 
 
+_REQUIRED_KEYS = frozenset({"onset", "offset", "midi", "confidence"})
+
+
+def _validate_worker_json(raw: object) -> list[dict]:
+    """bp_worker のJSON出力をプロセス間契約として検証する(レビューMEDIUM-2)。"""
+    if not isinstance(raw, list):
+        raise RuntimeError(
+            f"bp_worker returned unexpected JSON type: {type(raw).__name__} (list expected)"
+        )
+    for r in raw:
+        if not isinstance(r, dict) or not _REQUIRED_KEYS <= r.keys():
+            raise RuntimeError(f"bp_worker JSON要素が契約({sorted(_REQUIRED_KEYS)})に違反: {r!r}")
+    return raw
+
+
 def detect_events_poly(
-    path,
+    path: str | Path,
     min_dur: float = MIN_DUR_SEC,
     min_conf: float = MIN_CONFIDENCE,
 ) -> list[PitchEvent]:
@@ -53,7 +68,7 @@ def detect_events_poly(
     )
     if proc.returncode != 0:
         raise RuntimeError(f"bp_worker failed: {proc.stderr[-500:]}")
-    raw = json.loads(proc.stdout)
+    raw = _validate_worker_json(json.loads(proc.stdout))
 
     events = [
         PitchEvent(

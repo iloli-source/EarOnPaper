@@ -33,8 +33,8 @@ def test_poly_detects_simultaneous_notes(chords_wav):
     assert {60, 64, 67} <= head, f"先頭和音の3音が拾えていない: {sorted(head)}"
 
 
-def test_poly_silence_returns_empty(silence_wav):
-    assert detect_events_poly(silence_wav) == []
+def test_poly_silence_returns_empty(silence_wav_path):
+    assert detect_events_poly(silence_wav_path) == []
 
 
 def test_poly_e2e_pipeline(chords_wav, tmp_path):

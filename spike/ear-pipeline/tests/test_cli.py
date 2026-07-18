@@ -19,11 +19,11 @@ class TestCli:
         assert summary["output"] == str(out)
         assert "notes" not in summary  # サマリーは軽量表示
 
-    def test_default_output_path(self, silence_wav, tmp_path, capsys, monkeypatch):
+    def test_default_output_path(self, silence_wav_path, tmp_path, capsys, monkeypatch):
         # -o 省略時は入力と同じ場所に .musicxml
         import shutil
         wav = tmp_path / "in.wav"
-        shutil.copy(silence_wav, wav)
+        shutil.copy(silence_wav_path, wav)
         rc = main(["transcribe", str(wav)])
         assert rc == 0
         assert (tmp_path / "in.musicxml").exists()

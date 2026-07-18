@@ -16,7 +16,12 @@ from earpipe.notate import to_score, write_midi, write_musicxml
 from earpipe.quantize import BPM_DEFAULT, estimate_tempo, quantize_events
 
 
-def transcribe_file(in_path, out_musicxml=None, out_midi=None, engine: str = "mono") -> dict:
+def transcribe_file(
+    in_path: str | Path,
+    out_musicxml: str | Path | None = None,
+    out_midi: str | Path | None = None,
+    engine: str = "mono",
+) -> dict:
     """音声ファイルを採譜する。engine: mono(pYIN単音) / poly(basic-pitch多声)。
 
     戻り値: engine / n_events / n_notes / bpm / notes。
@@ -50,7 +55,7 @@ def transcribe_file(in_path, out_musicxml=None, out_midi=None, engine: str = "mo
     }
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="earpipe — 採譜エンジン spike v0")
     sub = p.add_subparsers(dest="command", required=True)
     pt = sub.add_parser("transcribe", help="音声ファイルを五線譜MusicXMLに採譜")

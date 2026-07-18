@@ -51,6 +51,11 @@ def detect_events(
         y, fmin=fmin, fmax=fmax, sr=sr, frame_length=FRAME, hop_length=HOP,
     )
     times = librosa.times_like(f0, sr=sr, hop_length=HOP)
+    # librosa仕様変更(hop/frame変更時のフレーム数不一致)を早期検出する(レビューMEDIUM-4)
+    if len(times) != len(f0):
+        raise RuntimeError(
+            f"times({len(times)})とf0({len(f0)})の長さが不一致 — librosaのフレーム計算仕様を確認"
+        )
     safe_f0 = np.where(np.isfinite(f0), f0, 1.0)
     midi = np.round(librosa.hz_to_midi(safe_f0)).astype(int)
     midi = np.where(np.asarray(voiced, dtype=bool) & np.isfinite(f0), midi, -1)

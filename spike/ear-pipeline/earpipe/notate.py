@@ -4,22 +4,27 @@
 記譜法の追加(TAB/简谱等)は出力プロファイル層の将来拡張(NF-045)。
 """
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import music21
 
+from earpipe.quantize import QuantizedNote
+
 TIME_SIGNATURE = "4/4"
 
 
-def _group_simultaneous(notes):
+def _group_simultaneous(
+    notes: Sequence[QuantizedNote],
+) -> list[tuple[float, float, list[int]]]:
     """同一開始拍の音をまとめる: [(start_beats, dur_beats, [midi...])]。
 
     和音の長さはメンバー最長に合わせる(v0.2の簡略化。声部分離は将来課題)。
     """
-    groups: dict[float, list] = {}
+    groups: dict[float, list[QuantizedNote]] = {}
     for n in notes:
         groups.setdefault(float(n.start_beats), []).append(n)
-    out = []
+    out: list[tuple[float, float, list[int]]] = []
     for start in sorted(groups):
         member = groups[start]
         dur = max(float(m.dur_beats) for m in member)
@@ -27,7 +32,7 @@ def _group_simultaneous(notes):
     return out
 
 
-def to_score(notes, bpm: float) -> music21.stream.Score:
+def to_score(notes: Sequence[QuantizedNote], bpm: float) -> music21.stream.Score:
     """量子化済み音符列を4/4の五線譜スコアにする(小節分割・タイはmusic21に委譲)。
 
     同一開始拍に複数音があれば和音(Chord)として記譜する。
@@ -55,9 +60,9 @@ def to_score(notes, bpm: float) -> music21.stream.Score:
     return score
 
 
-def write_musicxml(score: music21.stream.Score, path) -> None:
+def write_musicxml(score: music21.stream.Score, path: str | Path) -> None:
     score.write("musicxml", fp=str(Path(path)))
 
 
-def write_midi(score: music21.stream.Score, path) -> None:
+def write_midi(score: music21.stream.Score, path: str | Path) -> None:
     score.write("midi", fp=str(Path(path)))

@@ -77,6 +77,8 @@ def mutate_pitches(pm, n_mutations=8, seed=7):
 
 
 def mutate_rhythm(pm, seed=11):
+    # 注(レビューLOW-3): deepcopy後のNoteをin-place変更している。呼び出し元のpmは不変。
+    # プロジェクトの不変原則の例外だがテスト生成スクリプトのため許容(明記して記録)。
     rng = random.Random(seed)
     pm2 = copy.deepcopy(pm)
     for n in pm2.instruments[0].notes:

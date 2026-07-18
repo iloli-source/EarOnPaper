@@ -41,11 +41,10 @@ class TestQuantizeEvents:
     def test_grid_alignment(self):
         evs = events_from_melody(MELODY_SIMPLE, 120)
         notes = quantize_events(evs, bpm=120)
-        assert len(notes) == len(MELODY_SIMPLE)
-        for note, (m, s, d) in zip(sorted(notes, key=lambda n: n.start_beats), MELODY_SIMPLE):
-            assert note.midi == m
-            assert abs(note.start_beats - s) < 1e-9
-            assert abs(note.dur_beats - d) < 1e-9
+        # zip+ソートは順序前提が崩れると誤マッチする(レビューLOW-4)ため集合で完全一致を検証
+        got = {(n.midi, n.start_beats, n.dur_beats) for n in notes}
+        want = {(m, s, d) for m, s, d in MELODY_SIMPLE}
+        assert got == want
 
     def test_min_duration_is_16th(self):
         evs = [PitchEvent(onset=0.0, offset=0.02, midi=60, confidence=0.9)]

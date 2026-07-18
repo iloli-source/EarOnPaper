@@ -65,7 +65,10 @@ def chroma_similarity(y_orig: np.ndarray, y_synth: np.ndarray) -> dict:
     c1 = librosa.util.normalize(c1, axis=0)
     c2 = librosa.util.normalize(c2, axis=0)
     D, wp = librosa.sequence.dtw(X=c1, Y=c2, metric="cosine")
-    # 経路上の平均コサイン距離 → 類似度へ
+    # 経路上の平均コサイン距離 → 類似度へ。
+    # 注(レビューLOW-1): D[-1,-1]は累積コストで、len(wp)割りは「平均ステップコスト」の近似。
+    # 短い/ノイズ音声では1.0を超えうるためclipで[0,1]に制限している。
+    # 「1.0=完全一致」の解釈は距離が[0,1]に収まる場合のみ厳密に成立する。
     path_cost = D[-1, -1] / len(wp)
     similarity = float(np.clip(1.0 - path_cost, 0.0, 1.0))
     return {
