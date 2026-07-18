@@ -1,0 +1,159 @@
+"""PD正解つきベンチ: 正解MIDI→音声レンダリング→採譜→正解と突合。
+
+- 正解: score.logical-arts.jp の無料PD楽譜MIDI + ユーザー提供2曲
+- 比較: BP素点(ear_poly生イベント) vs 自社spike(量子化+記譜)
+- 指標: Note F1(音高一致+開始±tol) と ears.py 総合
+- 各曲は先頭60秒に統一(長尺曲の実行時間対策。結果に明記)
+"""
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import numpy as np
+import pretty_midi
+import soundfile as sf
+
+from earpipe.ear_poly import detect_events_poly
+from earpipe.pipeline import transcribe_file
+
+ROOT = Path(__file__).resolve().parents[3]
+CORPUS = ROOT / "tools" / "ai-ears" / "testdata" / "pd-corpus"
+OUT = CORPUS / "bench_out"
+EARS_PY = ROOT / "tools" / "ai-ears" / "ears.py"
+EARS_VENV = ROOT / "tools" / "ai-ears" / ".venv" / "bin" / "python"
+CLIP_SEC = 60.0
+SR = 22050
+
+SONGS = [
+    ("user-samples/Turkish_March_K331_C-Am", "trk_march", "ユーザー提供・高速+和音"),
+    ("user-samples/Romanze_Castellana_G-Em", "romanze", "ユーザー提供"),
+    ("furusato", "furusato", "民謡"),
+    ("sakura", "sakura", "民謡"),
+    ("kojo_no_tsuki", "kojo", "民謡伴奏"),
+    ("hamabe_no_uta", "hamabe", "民謡伴奏"),
+    ("hana", "hana", "民謡伴奏"),
+    ("fur_elise", "elise", "和音中"),
+    ("gymnopedie1", "gym1", "和音ゆっくり"),
+    ("traumerei", "traum", "和音中"),
+    ("moonlight_1st", "moon1", "和音厚"),
+    ("chopin_prelude7", "prel7", "和音短"),
+    ("gnossienne1", "gnoss1", "拍子自由"),
+    ("minute_waltz", "waltz", "高速"),
+    ("promenade", "prom", "変拍子"),
+]
+
+
+def clip_midi(pm: pretty_midi.PrettyMIDI, sec: float) -> list[tuple[float, float, int]]:
+    notes = []
+    for inst in pm.instruments:
+        if inst.is_drum:
+            continue
+        for n in inst.notes:
+            if n.start < sec:
+                notes.append((n.start, min(n.end, sec), n.pitch))
+    return sorted(notes)
+
+
+def render(pm: pretty_midi.PrettyMIDI, sec: float, dest: Path):
+    audio = pm.synthesize(fs=SR)
+    audio = audio[: int(sec * SR)]
+    peak = np.max(np.abs(audio)) or 1.0
+    sf.write(dest, audio / peak * 0.9, SR)
+
+
+def note_f1(gt: list, pred: list, tol: float) -> tuple[float, float, float]:
+    used = set()
+    tp = 0
+    for s, _e, p in pred:
+        best, best_d = None, tol
+        for i, (gs, _ge, gp) in enumerate(gt):
+            if i in used or gp != p:
+                continue
+            d = abs(gs - s)
+            if d <= best_d:
+                best, best_d = i, d
+        if best is not None:
+            used.add(best)
+            tp += 1
+    prec = tp / len(pred) if pred else 0.0
+    rec = tp / len(gt) if gt else 0.0
+    f1 = 2 * prec * rec / (prec + rec) if prec + rec else 0.0
+    return f1, prec, rec
+
+
+def midi_notes(path: Path) -> list:
+    pm = pretty_midi.PrettyMIDI(str(path))
+    return clip_midi(pm, CLIP_SEC)
+
+
+def events_to_midi(events, dest: Path):
+    pm = pretty_midi.PrettyMIDI()
+    inst = pretty_midi.Instrument(program=0)
+    for ev in events:
+        inst.notes.append(pretty_midi.Note(velocity=80, pitch=int(ev.midi), start=float(ev.onset), end=float(max(ev.offset, ev.onset + 0.05))))
+    pm.instruments.append(inst)
+    pm.write(str(dest))
+
+
+def ears_total(original: Path, transcription: Path) -> float | None:
+    try:
+        r = subprocess.run(
+            [str(EARS_VENV), str(EARS_PY), "compare", "--original", str(original), "--transcription", str(transcription), "--json"],
+            capture_output=True, text=True, timeout=600,
+        )
+        data = json.loads(r.stdout)
+        return data.get("total") or data.get("総合")
+    except Exception:
+        return None
+
+
+def main():
+    OUT.mkdir(exist_ok=True)
+    rows = []
+    for rel, slug, cat in SONGS:
+        gt_path = CORPUS / f"{rel}.mid"
+        if not gt_path.exists():
+            rows.append({"slug": slug, "status": "GT missing"})
+            continue
+        try:
+            pm = pretty_midi.PrettyMIDI(str(gt_path))
+            gt = clip_midi(pm, CLIP_SEC)
+            wav = OUT / f"{slug}.wav"
+            render(pm, CLIP_SEC, wav)
+
+            # BP素点
+            raw_events = [e for e in detect_events_poly(wav) if e.onset < CLIP_SEC]
+            bp_mid = OUT / f"{slug}_bp.mid"
+            events_to_midi(raw_events, bp_mid)
+            bp = midi_notes(bp_mid)
+
+            # 自社spike
+            spike_mid = OUT / f"{slug}_spike.mid"
+            transcribe_file(wav, out_midi=spike_mid, engine="poly")
+            sp = midi_notes(spike_mid)
+
+            row = {"slug": slug, "cat": cat, "gt_notes": len(gt), "status": "ok"}
+            for name, pred in (("bp", bp), ("spike", sp)):
+                f1a, pa, ra = note_f1(gt, pred, 0.1)
+                f1b, _, _ = note_f1(gt, pred, 0.2)
+                row[f"{name}_n"] = len(pred)
+                row[f"{name}_f1_100ms"] = round(f1a, 3)
+                row[f"{name}_p"] = round(pa, 3)
+                row[f"{name}_r"] = round(ra, 3)
+                row[f"{name}_f1_200ms"] = round(f1b, 3)
+            row["bp_ears"] = ears_total(wav, bp_mid)
+            row["spike_ears"] = ears_total(wav, spike_mid)
+            rows.append(row)
+            print(f"{slug}: gt={len(gt)} bp_f1={row['bp_f1_100ms']} spike_f1={row['spike_f1_100ms']}")
+        except Exception as e:
+            rows.append({"slug": slug, "status": f"FAIL {type(e).__name__}: {e}"})
+            print(f"{slug}: FAIL {e}")
+    (OUT / "results.json").write_text(json.dumps(rows, ensure_ascii=False, indent=1))
+    print("saved results.json")
+
+
+if __name__ == "__main__":
+    main()
