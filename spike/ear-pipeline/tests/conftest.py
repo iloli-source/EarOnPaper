@@ -128,3 +128,69 @@ def noise_wav(tmp_path_factory):
     path = tmp_path_factory.mktemp("audio") / "noise.wav"
     sf.write(path, (rng.standard_normal(SR * 3) * 0.1).astype(np.float32), SR)
     return path
+
+
+# ---- v0.2 多声フィクスチャ ----
+
+# 4/4・BPM100・三和音×8（各2拍）。ルート移動と転回を含む
+CHORDS_PROG = [
+    # (midis, start_beats, dur_beats)
+    ((60, 64, 67), 0.0, 2.0),   # C
+    ((65, 69, 72), 2.0, 2.0),   # F
+    ((62, 67, 71), 4.0, 2.0),   # G(転回)
+    ((60, 64, 67), 6.0, 2.0),   # C
+    ((57, 60, 64), 8.0, 2.0),   # Am
+    ((65, 69, 72), 10.0, 2.0),  # F
+    ((62, 65, 71), 12.0, 2.0),  # G7断片
+    ((60, 64, 67), 14.0, 2.0),  # C
+]
+
+
+def chords_to_seconds(chords, bpm):
+    """[(midi, onset_sec, offset_sec)] に展開（和音は音ごとに1行）。"""
+    spb = 60.0 / bpm
+    out = []
+    for midis, s, d in chords:
+        for m in midis:
+            out.append((m, s * spb, (s + d) * spb))
+    return out
+
+
+def render_chords(chords, bpm, sr=SR, gap=0.04, amp=0.22, harmonics=(1.0, 0.5, 0.25)):
+    """三和音を倍音つきで合成（純粋sineより実楽器に近づけ、多声検出器が扱える音色にする）。"""
+    spb = 60.0 / bpm
+    total = max(s + d for _, s, d in chords) * spb + 0.5
+    y = np.zeros(int(total * sr), dtype=np.float64)
+    for midis, start, dur in chords:
+        t0 = start * spb
+        t1 = (start + dur) * spb - gap
+        n0, n1 = int(t0 * sr), int(t1 * sr)
+        n = n1 - n0
+        if n <= 0:
+            continue
+        t = np.arange(n) / sr
+        seg = np.zeros(n)
+        for m in midis:
+            f = 440.0 * 2 ** ((m - 69) / 12)
+            for k, h in enumerate(harmonics, start=1):
+                seg += amp * h * np.sin(2 * np.pi * f * k * t)
+        env = np.ones(n)
+        a = min(int(0.008 * sr), n // 4)
+        r = min(int(0.04 * sr), n // 4)
+        if a > 0:
+            env[:a] = np.linspace(0, 1, a)
+        if r > 0:
+            env[-r:] = np.linspace(1, 0, r)
+        y[n0:n1] += seg * env
+    peak = float(np.max(np.abs(y)))
+    if peak > 0.9:
+        y *= 0.9 / peak
+    return y.astype(np.float32)
+
+
+@pytest.fixture(scope="session")
+def chords_wav(tmp_path_factory):
+    import soundfile as sf
+    path = tmp_path_factory.mktemp("audio") / "chords_100.wav"
+    sf.write(path, render_chords(CHORDS_PROG, 100), SR)
+    return path, CHORDS_PROG, 100

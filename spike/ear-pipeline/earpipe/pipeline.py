@@ -11,18 +11,25 @@ from pathlib import Path
 import librosa
 
 from earpipe.ear import detect_events
+from earpipe.ear_poly import detect_events_poly
 from earpipe.notate import to_score, write_midi, write_musicxml
 from earpipe.quantize import BPM_DEFAULT, estimate_tempo, quantize_events
 
 
-def transcribe_file(in_path, out_musicxml=None, out_midi=None) -> dict:
-    """音声ファイルを採譜する。戻り値: n_events / n_notes / bpm / notes。"""
-    y, sr = librosa.load(str(in_path), sr=None, mono=True)
-    events = detect_events(y, sr)
+def transcribe_file(in_path, out_musicxml=None, out_midi=None, engine: str = "mono") -> dict:
+    """音声ファイルを採譜する。engine: mono(pYIN単音) / poly(basic-pitch多声)。
+
+    戻り値: engine / n_events / n_notes / bpm / notes。
+    """
+    if engine == "poly":
+        events = detect_events_poly(in_path)
+    else:
+        y, sr = librosa.load(str(in_path), sr=None, mono=True)
+        events = detect_events(y, sr)
 
     if events:
         bpm = estimate_tempo(events)
-        notes = quantize_events(events, bpm)
+        notes = quantize_events(events, bpm, mono=(engine == "mono"))
     else:
         bpm = BPM_DEFAULT
         notes = []
@@ -35,6 +42,7 @@ def transcribe_file(in_path, out_musicxml=None, out_midi=None) -> dict:
 
     return {
         "input": str(in_path),
+        "engine": engine,
         "n_events": len(events),
         "n_notes": len(notes),
         "bpm": bpm,
@@ -49,10 +57,16 @@ def main(argv=None) -> int:
     pt.add_argument("input", help="入力音声(wav/mp3等)")
     pt.add_argument("-o", "--output", help="MusicXML出力先(既定: 入力名.musicxml)")
     pt.add_argument("--midi", help="MIDI出力先(任意)")
+    pt.add_argument(
+        "--engine", choices=("mono", "poly"), default="mono",
+        help="mono=pYIN単音(既定) / poly=basic-pitch多声",
+    )
     args = p.parse_args(argv)
 
     out = args.output or str(Path(args.input).with_suffix(".musicxml"))
-    result = transcribe_file(args.input, out_musicxml=out, out_midi=args.midi)
+    result = transcribe_file(
+        args.input, out_musicxml=out, out_midi=args.midi, engine=args.engine
+    )
     summary = {k: v for k, v in result.items() if k != "notes"}
     summary["output"] = out
     print(json.dumps(summary, ensure_ascii=False, indent=2))

@@ -44,3 +44,16 @@
 ## 依存
 
 `requirements.txt`（librosa 0.11 / music21 10.5 / numpy 2.4 ほか）。venv: `.venv/`（Python 3.14）。
+
+
+---
+
+## v0.2（2026-07-19）: 多声対応
+
+- **耳層(多声)**: `earpipe/ear_poly.py` — basic-pitch を別インタプリタ（`tools/ai-ears/.venv312`、Python 3.12）の `bp_worker.py` 経由で実行（JSON契約のsubprocess。Python 3.14本体からの利用のため）。`EARPIPE_BP_PYTHON` で差し替え可
+- **モデルはTFLite（nmp.tflite）固定**: TF SavedModel=環境非互換、**ONNX=出力が壊れる（無音でnote事後確率0.60）ため使用禁止**。検証記録は bp_worker.py 冒頭コメント参照
+- **量子化**: `quantize_events(..., mono=False)` で同時発音を許可。**記譜**: 同一開始拍をChord化（長さはメンバー最長に簡略化。声部分離は将来課題）
+- **CLI**: `pipeline.py transcribe in.wav --engine poly`
+- **テスト**: 37件全パス・カバレッジ95%（bp_worker は3.12側実行のため計測外、E2Eで検証）
+- **実曲ベンチ（対BP素点）**: リズム(出だし)を3曲全てで改善（+0.10〜0.15、precision向上主導）。詳細は `docs/research/g0-ledger.md` §7
+- **既知の限界**: テンポ推定が密な多声で高BPMに張り付く／和音の長さ簡略化／ライセンス: basic-pitch はコード・モデルとも Apache-2.0

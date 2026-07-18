@@ -53,11 +53,14 @@ def estimate_tempo(
     return BPM_DEFAULT
 
 
-def quantize_events(events: list[PitchEvent], bpm: float) -> list[QuantizedNote]:
+def quantize_events(
+    events: list[PitchEvent], bpm: float, mono: bool = True
+) -> list[QuantizedNote]:
     """イベントを16分格子に吸着させ音符列にする。
 
     - 開始・長さとも最寄りの16分格子に丸める(最短は16分)
-    - 次の音符の開始を越える長さは切り詰める(単旋律v0の前提)
+    - mono=True: 次の音符の開始を越える長さは切り詰める(単旋律の前提)
+    - mono=False(多声): 同時発音を許し、切り詰めは行わない
     - 同一開始・同一音高の重複は長い方を残す
     """
     if not events:
@@ -84,6 +87,8 @@ def quantize_events(events: list[PitchEvent], bpm: float) -> list[QuantizedNote]
             dedup[key] = n
 
     notes = sorted(dedup.values(), key=lambda n: (n.start_beats, n.midi))
+    if not mono:
+        return notes
     clipped: list[QuantizedNote] = []
     for i, n in enumerate(notes):
         dur = n.dur_beats
