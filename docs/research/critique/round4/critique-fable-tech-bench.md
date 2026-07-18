@@ -1,3 +1,5 @@
+> 【歴史的記録】本書は作成時点の前提・知見に基づくスナップショットです。その後の決定により一部前提は更新されています。現在の前提は `README.md`・`docs/requirements/product-vision.md`・`docs/research/gate-execution-spec.md`(最新改訂) を参照してください。
+
 # Round 4 批判 — ベンチ仕様 封緘前 最終レビュー
 
 **レビュアー:** Fable 5（MIR研究・プロダクト評価設計）

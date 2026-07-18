@@ -1,3 +1,5 @@
+> 【歴史的記録】本書は作成時点の前提・知見に基づくスナップショットです。その後の決定により一部前提は更新されています。現在の前提は `README.md`・`docs/requirements/product-vision.md`・`docs/research/gate-execution-spec.md`(最新改訂) を参照してください。
+
 # 音楽計器UIのWeb調査 — 採譜アプリへの取り込み判断
 
 **調査担当:** Fable（Web分解担当。grok=X言説 / codex=理論 と分担）

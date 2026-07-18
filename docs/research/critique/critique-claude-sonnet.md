@@ -1,3 +1,5 @@
+> 【歴史的記録】本書は作成時点の前提・知見に基づくスナップショットです。その後の決定により一部前提は更新されています。現在の前提は `README.md`・`docs/requirements/product-vision.md`・`docs/research/gate-execution-spec.md`(最新改訂) を参照してください。
+
 # 投資委員会レビュー：AI採譜プロジェクト「現在の結論」への辛口批判（事業・法務特化版）
 
 **担当モデル：Claude Sonnet 4.6（事業面・著作権・法務リスク集中担当）**

@@ -1,3 +1,5 @@
+> 【歴史的記録】本書は作成時点の前提・知見に基づくスナップショットです。その後の決定により一部前提は更新されています。現在の前提は `README.md`・`docs/requirements/product-vision.md`・`docs/research/gate-execution-spec.md`(最新改訂) を参照してください。
+
 # Round 4 批判：経済性ゲート（G0）とGOゲート列の検査
 
 **立場:** インディーSaaS財務に詳しい投資委員会レビュアー（一人会社・SES本業・資金繰り敏感を前提）

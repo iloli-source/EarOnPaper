@@ -1,3 +1,5 @@
+> 【歴史的記録】本書は作成時点の前提・知見に基づくスナップショットです。その後の決定により一部前提は更新されています。現在の前提は `README.md`・`docs/requirements/product-vision.md`・`docs/research/gate-execution-spec.md`(最新改訂) を参照してください。
+
 Slack作業ログは未投稿です。`tool_search` で確認しましたが、この環境には `slack_send_message` / `send_message` 相当のチャンネル直接投稿ツールが公開されていませんでした。
 
 **1. v2でもなお欠落**

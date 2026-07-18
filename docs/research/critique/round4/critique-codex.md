@@ -1,3 +1,5 @@
+> 【歴史的記録】本書は作成時点の前提・知見に基づくスナップショットです。その後の決定により一部前提は更新されています。現在の前提は `README.md`・`docs/requirements/product-vision.md`・`docs/research/gate-execution-spec.md`(最新改訂) を参照してください。
+
 **投資委員会レビュー結論**
 
 対象: [conclusions-v4.md](REPO_ROOT/docs/research/conclusions-v4.md) / [round3 critique-summary.md](REPO_ROOT/docs/research/critique/round3/critique-summary.md)

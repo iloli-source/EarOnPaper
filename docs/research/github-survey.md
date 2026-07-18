@@ -1,3 +1,5 @@
+> 【歴史的記録】本書は作成時点の前提・知見に基づくスナップショットです。その後の決定により一部前提は更新されています。現在の前提は `README.md`・`docs/requirements/product-vision.md`・`docs/research/gate-execution-spec.md`(最新改訂) を参照してください。
+
 # AI採譜（AMT）GitHub網羅調査レポート
 
 `gh` CLIで音楽採譜（audio→MIDI／audio→score）関連リポジトリを横断検索し、主要プロジェクトのメタデータとissueを収集。スター数・pushはすべて調査時点（2026-07-18）の値。`pushed`（最終コミット）が実態を表すため`updated`と区別している。

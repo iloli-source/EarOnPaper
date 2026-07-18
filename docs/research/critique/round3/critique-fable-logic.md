@@ -1,3 +1,5 @@
+> 【歴史的記録】本書は作成時点の前提・知見に基づくスナップショットです。その後の決定により一部前提は更新されています。現在の前提は `README.md`・`docs/requirements/product-vision.md`・`docs/research/gate-execution-spec.md`(最新改訂) を参照してください。
+
 # Round 3 批判：内部論理の一貫性（Fable 5 / 論理・議論分析担当）
 
 **対象:** conclusions-v3.md（差分確認に conclusions-v2.md、critique/round2/critique-summary.md を参照）

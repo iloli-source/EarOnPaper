@@ -1,3 +1,5 @@
+> 【歴史的記録】本書は作成時点の前提・知見に基づくスナップショットです。その後の決定により一部前提は更新されています。現在の前提は `README.md`・`docs/requirements/product-vision.md`・`docs/research/gate-execution-spec.md`(最新改訂) を参照してください。
+
 # 要件一覧 v2.1 批判レビュー（Fable・第2巡）
 
 **レビュー対象:** functional-requirements.md（102件）/ non-functional-requirements.md（44件）

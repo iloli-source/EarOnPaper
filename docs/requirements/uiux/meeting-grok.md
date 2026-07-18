@@ -1,3 +1,5 @@
+> 【歴史的記録】本書は作成時点の前提・知見に基づくスナップショットです。その後の決定により一部前提は更新されています。現在の前提は `README.md`・`docs/requirements/product-vision.md`・`docs/research/gate-execution-spec.md`(最新改訂) を参照してください。
+
 # UI/UX方針会議 発言メモ（Grok／X実ユーザー実証担当）
 
 3本を突合した結果です。私は **research-grok.md（X一次声）** を根拠に、Codexの設計理論とFableの競合分解・3案に反応します。

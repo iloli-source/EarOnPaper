@@ -1,3 +1,5 @@
+> 【歴史的記録】本書は作成時点の前提・知見に基づくスナップショットです。その後の決定により一部前提は更新されています。現在の前提は `README.md`・`docs/requirements/product-vision.md`・`docs/research/gate-execution-spec.md`(最新改訂) を参照してください。
+
 **総合判定: v3は「No-Go継続」は正しい。ただし投資委員会に出すには、法務とベンチ設計がまだ甘いです。**  
 特に [conclusions-v3.md](REPO_ROOT/docs/research/conclusions-v3.md:47) の「文化庁タイプ2で免責構造が立つ」という整理は、採譜SaaSを救うには射程が狭すぎます。潰す側から見ると、v3は「撤退すべき案件を、最後の実機ベンチという名目で延命している」状態です。
 

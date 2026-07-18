@@ -1,3 +1,5 @@
+> 【歴史的記録】本書は作成時点の前提・知見に基づくスナップショットです。その後の決定により一部前提は更新されています。現在の前提は `README.md`・`docs/requirements/product-vision.md`・`docs/research/gate-execution-spec.md`(最新改訂) を参照してください。
+
 # AI採譜プロジェクト「改訂結論v2」への Round 2 批判レビュー（Claude Opus 4.8 / 投資委員会・棄却前提）
 
 **レビュアー:** Claude Opus 4.8

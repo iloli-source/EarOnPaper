@@ -1,3 +1,5 @@
+> 【歴史的記録】本書は作成時点の前提・知見に基づくスナップショットです。その後の決定により一部前提は更新されています。現在の前提は `README.md`・`docs/requirements/product-vision.md`・`docs/research/gate-execution-spec.md`(最新改訂) を参照してください。
+
 2026-07-19時点の調査要約です。Slack送信は試みましたが、現在のツール面に `send_message` が露出しておらず、Slack connector のインストール確認も未完了だったため未投稿です。
 
 # AI採譜アプリ向け 波形処理技術調査
