@@ -203,7 +203,7 @@
 
 発火時は**プランBをプランA相当（即クローズ＋台帳保存）に自動降格**。
 
-**定点観測（週次15分・grokプロトコル）:** ①自前でMuseScore audio2scoreに固定3曲を投入し手直し感を記録 ②musescore.orgリリースノート/MuseHub（ベータ表記削除・無料化） ③GitHub musescore/MuseScore のaudio系PR ④隔週でフォーラム「Import audio to score」スレ ⑤月次でMuse Group全体（UG/Songsterr/NoteVision）とヤマハ・カワイのAMT動向。観測ログはベンチ台帳と同じ場所に1行ずつ追記
+**定点観測（週次15分・grokプロトコル）:** ①自前でMuseScore audio2scoreに固定3曲を投入しAIの耳ハーネスの複合スコアと聴感メモを記録（改訂3の主指標語彙に統一） ②musescore.orgリリースノート/MuseHub（ベータ表記削除・無料化） ③GitHub musescore/MuseScore のaudio系PR ④隔週でフォーラム「Import audio to score」スレ ⑤月次でMuse Group全体（UG/Songsterr/NoteVision）とヤマハ・カワイのAMT動向。観測ログはベンチ台帳と同じ場所に1行ずつ追記
 
 ## §8. 最終判定会
 
