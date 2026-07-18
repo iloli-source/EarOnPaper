@@ -41,10 +41,28 @@
 ## 4. 残作業（判定確定まで）
 
 1. **MuScriptor**: ユーザーのHuggingFaceアカウントでモデル利用規約に同意しトークンを設定（数クリック）→ AIが再実行
-2. **MuseScore audio2score β**: GUI操作（ユーザー数クリック or 次セッションで自動化検討）
+2. **MuseScore audio2score β（NoteVision）**: 自動化不可＝ユーザー手動。詳細は末尾「§6 MuseScoreβ手順書」参照。
 3. **第二段判定=ユーザー聴き比べ**: 各曲「元音源 → 採譜結果の再生音」を聴き比べ3段階記録。再生ペアは準備済み — 元: testdata/g0/uX.wav / 採譜再生: testdata/g0/renders/uX_basicpitch_render.wav
 4. 3ツール揃った時点で相対比較→封緘ルール（kit §4）で判定
 
 ## 5. 判定（未確定）
 
 第一段の暫定値のみ。封緘ルールでの判定は残作業1-3の完了後に行う。**現時点の暫定観察: OSS下限ツールでも「音の高さは大体合うがリズムが崩れる」— これは本プロジェクトの勝負所（リズム/整譜・選択的抽出）が実在する方向の証拠だが、競合上位ツール（MuScriptor/MuseScoreβ）の実測を待って判断する。**
+
+## 6. MuseScoreβ手順書（自動化不可のためユーザー手動）
+
+**偵察結果（2026-07-19実施）**
+- 「Import audio to score」の実体は MuseScore.com の Web機能「**NoteVision**」。エントリーは **https://musescore.com/upload** の「Convert」欄にある **「Audio to MSCZ（Beta）」** ボタン。MuseScore Studio 4.7.4 の File メニューからも同URLへ飛ぶ。
+- **自動化不可の理由:** ボタン押下で即「無料アカウント作成／ログイン」モーダルが出る＝**ログイン必須**。ユーザーの現Chromeセッションはmusescore.comにサインイン途中（ユーザー名未作成・希望名「kurachi」が使用済みで停止中）で、使えるログイン状態ではない。制約により新規アカウント作成は行わないため、AI自動実行はここで打ち切り。
+- **料金/制限:** 従来は完全無料。現在は「無料枠（アップロード回数に上限あり・具体数は非公表）＋ MuseScore Pro Plus は無制限」へ移行中。出力は **MSCZ**（MusicXML書き出しの明記なし。MSCZをMuseScore Studioで開けば内部でMusicXML/MIDI相当に変換可）。3曲の検証は無料枠内で十分収まる想定。
+- **音源準備済み:** WAV（35-42MB）はアップロード上限に触れる恐れがあるため 192kbps MP3 に変換済み → `tools/ai-ears/testdata/g0/musescore/u1.mp3 u2.mp3 u4.mp3`（各5-6MB）。
+
+**そのままなぞれる操作手順（ユーザー実施）**
+1. https://musescore.com/upload を開く（またはMuseScore Studio 4.7.4の File → Import audio to score）。右上「ログイン」から自分のアカウントでサインインを完了する（ユーザー名作成が必要なら別名を設定。※本作業はkurachiでなくても可）。
+2. 「Convert」欄の **「Audio to MSCZ（Beta）」** をクリック。
+3. ファイル選択で `…/採譜/tools/ai-ears/testdata/g0/musescore/u1.mp3` をアップロード → AI変換を待つ。
+4. 変換結果画面で **MSCZをダウンロード**。保存先: 同じ `musescore/` フォルダに `u1.mscz` として保存。
+5. u2.mp3・u4.mp3 で 2-4 を繰り返し、`u2.mscz` `u4.mscz` を同フォルダに保存。
+6. 完了後にこのセッション（またはAI）へ「3曲のmsczを保存した」と伝える → AIが ears.py で評価し、本台帳「§2 ツール実行記録」のMuseScoreβ行と「§3」スコア表を更新して封緘判定に進む。
+
+**AI側の後続手順（msczが揃い次第）:** 各msczをMuseScore CLIで `--export-to uX_musescore.mid`（またはMusicXML）へ変換 → ears.py に既存Basic Pitchと同じ参照で投入 → 3ツール相対比較で判定確定。
