@@ -65,3 +65,4 @@ tools/
 - 調査は多モデル分担: grok=X実ユーザー / codex=論文・規格 / Claude=Web・統合 / gemini=補完（クォータ回復時。CLIは故障中・REST API直叩き）
 - 定点観測: MuseScore audio2scoreβの品質を週次15分で実測（kill switch 3条件はspec §7）
 - 前提が転換したら既存文書を連鎖更新する（「仕様に書いてある」を防衛根拠にしない）
+- **Issue駆動開発**: 開発作業はIssueを立ててから着手し、進捗・検証結果をIssueに記録、完了時に結果つきでクローズ（devラベル）
