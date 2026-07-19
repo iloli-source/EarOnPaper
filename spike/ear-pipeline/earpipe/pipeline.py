@@ -26,6 +26,7 @@ def transcribe_file(
     postfilter: bool = False,
     field_mode: bool = False,
     timing: str = "grid",
+    title: str | None = None,
 ) -> dict:
     """音声ファイルを採譜する。engine: mono(pYIN単音) / poly(basic-pitch多声)。
 
@@ -74,7 +75,8 @@ def transcribe_file(
         grid_per_beat = GRID_PER_BEAT
         notes = []
 
-    score = to_score(notes, bpm)
+    # 曲名メタデータの貫通(#42): 未指定なら入力ファイル名を使う
+    score = to_score(notes, bpm, title=title or Path(in_path).stem)
     if out_musicxml:
         write_musicxml(score, out_musicxml)  # 譜面は常に格子側(楽譜=量子化表現)
     if out_midi:
@@ -111,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     pt.add_argument("-o", "--output", help="MusicXML出力先(既定: 入力名.musicxml)")
     pt.add_argument("--midi", help="MIDI出力先(任意)")
     pt.add_argument("--pdf", help="五線譜PDF出力先(任意。ADR-004: Verovio)")
+    pt.add_argument("--title", help="譜面タイトル(既定: 入力ファイル名)")
     pt.add_argument(
         "--field-mode", action="store_true",
         help="フィールド録音モード(C8): SNR適応の選択的抽出+非音程成分の分類報告",
@@ -144,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
         postfilter=args.postfilter,
         field_mode=args.field_mode,
         timing=args.timing,
+        title=args.title,
     )
     summary = {k: v for k, v in result.items() if k != "notes"}
     summary["output"] = out
