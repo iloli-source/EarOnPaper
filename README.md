@@ -1,4 +1,4 @@
-# 採譜プロジェクト (AI Music Transcription)
+# Pitchsieve — 採譜プロジェクト (AI Music Transcription)
 
 **絶対音感エミュレータ** — 雑音を含む日常録音から、絶対音感を持つ人のように音程成分だけを選択的に抽出して楽譜にする。非音楽家がターゲット。詳細: [プロダクトビジョン](docs/requirements/product-vision.md)
 
