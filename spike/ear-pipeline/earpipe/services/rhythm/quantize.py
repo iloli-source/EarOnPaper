@@ -1,8 +1,20 @@
 """変換層: 音程イベント → テンポ推定・16分格子への量子化 → 音符列。"""
 
+import warnings
+
 import numpy as np
 
 from earpipe.contracts import PitchEvent, QuantizedNote
+
+
+class TempoOctaveAmbiguityWarning(UserWarning):
+    """真のテンポが探索範囲外(遅い側)にある可能性を示す警告(Issue #47 R3)。
+
+    一様な音符列では「8分@T」と「4分@2T」が数学的に同一のため、範囲外の
+    遅いテンポは範囲内の倍テンポに化ける。倍解釈を黙って返す代わりに、
+    半分テンポの解釈が同等にフィットし音価としても妥当な場合に本警告を発する。
+    範囲を知っている呼び出し側は bpm_min/bpm_max 引数で探索範囲を拡張できる。
+    """
 
 BPM_MIN = 60.0
 BPM_MAX = 180.0
@@ -55,6 +67,45 @@ def _log2_gauss(x: float, center: float, sigma: float) -> float:
     return float(np.exp(-(d * d) / (2.0 * sigma * sigma)))
 
 
+def _validate_bpm_range(bpm_min: float, bpm_max: float) -> None:
+    """探索範囲引数の境界検証(Issue #47)。不正値は黙認せず明示エラー。"""
+    if not (np.isfinite(bpm_min) and np.isfinite(bpm_max)):
+        raise ValueError(f"bpm range must be finite, got bpm_min={bpm_min}, bpm_max={bpm_max}")
+    if bpm_min <= 0 or bpm_min >= bpm_max:
+        raise ValueError(
+            f"bpm range must satisfy 0 < bpm_min < bpm_max, got bpm_min={bpm_min}, bpm_max={bpm_max}"
+        )
+
+
+def _warn_if_slow_octave_ambiguous(
+    iois: np.ndarray, chosen: float, best_fit: float, bpm_min: float
+) -> None:
+    """R3: 選択テンポの半分(範囲外の遅い側)が同等フィットかつ音価妥当なら警告。
+
+    速い側(真テンポ>bpm_max)は「4分@2T ≡ 8分@T」の自明な整除により常に
+    フィットするため構造的に検出不能(限界台帳参照)。検出可能な遅い側のみ扱う。
+    """
+    half = chosen / 2.0
+    if half >= bpm_min:
+        return  # 半分候補も範囲内なら通常の倍半処理で選択済み
+    if _grid_fit(iois, half) < best_fit - FIT_BAND:
+        return
+    ratio_half = float(np.median(iois)) / (60.0 / half)
+    plausible = max(
+        _log2_gauss(ratio_half, 0.5, SUBDIV_SIGMA_LOG2),
+        _log2_gauss(ratio_half, 1.0, SUBDIV_SIGMA_LOG2),
+    )
+    if plausible >= 0.5:
+        warnings.warn(
+            TempoOctaveAmbiguityWarning(
+                f"推定テンポ {chosen:.1f} BPM の半分 {half:.1f} BPM(探索範囲外)も"
+                f"同等にフィットします。真のテンポが遅い可能性があります"
+                f"(必要なら bpm_min を下げて再推定してください)"
+            ),
+            stacklevel=3,
+        )
+
+
 def estimate_tempo(
     events: list[PitchEvent],
     bpm_min: float = BPM_MIN,
@@ -72,8 +123,14 @@ def estimate_tempo(
     3. 倍半処理: フィット同点帯の候補から、中央値IOIの音価妥当性(8分/4分を優先)
        と音楽的テンポ事前分布(log2ガウス)の積で選択
 
-    限界: 一定テンポを仮定する。ルバート・テンポ変化曲は範囲外(READMEに記録)。
+    限界(台帳・Issue #47で追記):
+    - 一定テンポを仮定する。ルバート・テンポ変化曲は範囲外(READMEに記録)
+    - 真テンポ<bpm_min の一様音符列は範囲内の倍テンポに化ける。検出可能な
+      場合は TempoOctaveAmbiguityWarning を発する(半分解釈が同fit・音価妥当)
+    - 真テンポ>bpm_max は半分テンポ解釈と数学的に同一のため検出不能
+      (例: 4分@200 ≡ 8分@100)。範囲を知る呼び出し側は bpm_min/bpm_max で拡張可
     """
+    _validate_bpm_range(bpm_min, bpm_max)
     iois = _prep_iois(events)
     if iois is None:
         return BPM_DEFAULT
@@ -98,7 +155,9 @@ def estimate_tempo(
         prior = _log2_gauss(bpm, PRIOR_CENTER_BPM, PRIOR_SIGMA_LOG2)
         return fits[bpm] * subdiv * prior
 
-    return max(band, key=total_score)
+    chosen = max(band, key=total_score)
+    _warn_if_slow_octave_ambiguous(iois, chosen, best_fit, bpm_min)
+    return chosen
 
 
 def _prep_iois(events: list[PitchEvent]) -> np.ndarray | None:
@@ -141,10 +200,14 @@ def estimate_grid(
     (Romanze: 正解96 → 旧実装144)。両系を候補にし、音価妥当性と
     テンポ事前分布(+3分系へのオッカム減点)で選択する。
 
-    既知の限界(正直な記録): 一様な音符列では両系が完全に同点になるため、
-    事前分布中心(108BPM)から遠い三連曲は2分系に倒れうる。
-    ルバート・区間転換(曲中の系切替)はスコープ外。
+    既知の限界(正直な記録・Issue #47実測で数値固定):
+    - 一様な音符列では両系が完全に同点になるため、事前分布中心(108BPM)から
+      遠い三連曲は2分系に倒れる。実測(2026-07-19): 三連@72→(108,4)・
+      三連@90→(135,4)に誤倒れ(一様・変化形とも)。有効域は96-120近傍
+      (tests/test_triplet.py・test_rhythm_guards.pyで境界を回帰固定)
+    - ルバート・区間転換(曲中の系切替)はスコープ外。
     """
+    _validate_bpm_range(bpm_min, bpm_max)
     iois = _prep_iois(events)
     if iois is None:
         return BPM_DEFAULT, GRID_PER_BEAT
@@ -187,7 +250,13 @@ def quantize_events(
     - mono=True: 次の音符の開始を越える長さは切り詰める(単旋律の前提)
     - mono=False(多声): 同時発音を許し、切り詰めは行わない
     - 同一開始・同一音高の重複は長い方を残す
+    - bpm/grid_per_beat は境界検証する(Issue #47: bpm=0のZeroDivision・
+      負bpmの負start_beats黙認を明示エラー化)
     """
+    if not np.isfinite(bpm) or bpm <= 0:
+        raise ValueError(f"bpm must be a positive finite number, got {bpm}")
+    if grid_per_beat < 1:
+        raise ValueError(f"grid_per_beat must be >= 1, got {grid_per_beat}")
     if not events:
         return []
     grid = 60.0 / bpm / grid_per_beat
