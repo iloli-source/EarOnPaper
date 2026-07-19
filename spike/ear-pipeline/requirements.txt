@@ -1,8 +1,11 @@
+CairoSVG==2.9.0
 librosa==0.11.0
 music21==10.5.0
 numpy==2.4.6
 pretty_midi==0.2.11
-pytest==9.1.1
+pypdf==6.14.2
 pytest-cov==7.1.0
+pytest==9.1.1
 scipy==1.18.0
 soundfile==0.14.0
+verovio==6.2.1
