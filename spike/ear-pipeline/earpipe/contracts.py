@@ -24,3 +24,17 @@ class QuantizedNote:
     dur_beats: float
     midi: int
     confidence: float
+
+
+@dataclass(frozen=True)
+class FieldReport:
+    """フィールド録音の分析報告: 抽出しなかった成分も含めて正直に分類する(C8)。
+
+    比率は入力エネルギーに対する概算(HPSS+スペクトル平坦度によるヒューリスティック)。
+    """
+
+    snr_db: float           # 推定SNR(dB)。大きいほどクリーン
+    noise_profile: str      # "clean" / "noisy" / "very_noisy"
+    harmonic_ratio: float   # 音程を持ちうる成分の比率
+    percussive_ratio: float  # 打撃様(非音程)成分の比率
+    noise_like_ratio: float  # ノイズ様成分の比率

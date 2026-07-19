@@ -6,13 +6,14 @@
 
 import argparse
 import json
+from dataclasses import asdict
 from pathlib import Path
 
 
-from earpipe.services.ear import apply_postfilter, detect_events, detect_events_poly
+from earpipe.services.ear import apply_postfilter, detect_events, detect_events_poly, select_events
 from earpipe.services.notate import to_score, write_midi, write_musicxml
 from earpipe.services.rhythm import BPM_DEFAULT, estimate_tempo, quantize_events
-from earpipe.services.stem import load_audio
+from earpipe.services.stem import analyze_field, denoise, load_audio
 
 
 def transcribe_file(
@@ -22,6 +23,7 @@ def transcribe_file(
     engine: str = "mono",
     sensitivity: str = "normal",
     postfilter: bool = False,
+    field_mode: bool = False,
 ) -> dict:
     """音声ファイルを採譜する。engine: mono(pYIN単音) / poly(basic-pitch多声)。
 
@@ -32,13 +34,23 @@ def transcribe_file(
     オプトインで残し、再設計の方向性は Issue #31 クローズコメントに記録。
     戻り値: engine / n_events / n_notes / bpm / notes。
     """
+    analysis = None
+    if field_mode:
+        y_field, sr_field = load_audio(in_path)
+        analysis = analyze_field(y_field, sr_field)
+
     if engine == "poly":
         events = detect_events_poly(in_path, sensitivity=sensitivity)
         if postfilter:
             events = apply_postfilter(events)
     else:
         y, sr = load_audio(in_path)
+        if field_mode:
+            y = denoise(y, sr)
         events = detect_events(y, sr)
+
+    if analysis is not None:
+        events = select_events(events, analysis.snr_db)
 
     if events:
         bpm = estimate_tempo(events)
@@ -53,7 +65,7 @@ def transcribe_file(
     if out_midi:
         write_midi(score, out_midi)
 
-    return {
+    result = {
         "input": str(in_path),
         "engine": engine,
         "n_events": len(events),
@@ -61,6 +73,9 @@ def transcribe_file(
         "bpm": bpm,
         "notes": notes,
     }
+    if analysis is not None:
+        result["field_report"] = asdict(analysis.report)
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -70,6 +85,10 @@ def main(argv: list[str] | None = None) -> int:
     pt.add_argument("input", help="入力音声(wav/mp3等)")
     pt.add_argument("-o", "--output", help="MusicXML出力先(既定: 入力名.musicxml)")
     pt.add_argument("--midi", help="MIDI出力先(任意)")
+    pt.add_argument(
+        "--field-mode", action="store_true",
+        help="フィールド録音モード(C8): SNR適応の選択的抽出+非音程成分の分類報告",
+    )
     pt.add_argument(
         "--engine", choices=("mono", "poly"), default="mono",
         help="mono=pYIN単音(既定) / poly=basic-pitch多声",
@@ -92,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
         engine=args.engine,
         sensitivity=args.sensitivity,
         postfilter=args.postfilter,
+        field_mode=args.field_mode,
     )
     summary = {k: v for k, v in result.items() if k != "notes"}
     summary["output"] = out
