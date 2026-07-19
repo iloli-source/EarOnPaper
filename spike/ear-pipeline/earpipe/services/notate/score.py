@@ -15,8 +15,9 @@ import music21
 
 from earpipe.contracts import QuantizedNote
 from earpipe.services.notate.spelling import estimate_key, spell_midi
+from earpipe.services.rhythm.meter import estimate_meter
 
-TIME_SIGNATURE = "4/4"
+TIME_SIGNATURE = "4/4"  # 空入力・退避時の既定(推定はestimate_meter)
 BEATS_PER_MEASURE = 4
 MIDDLE_C = 60
 # staffの中央線(これより上は符幹down、下はup): ト音=B4(71) / ヘ音=D3(50)
@@ -223,11 +224,12 @@ def _build_staff(
     bpm: float | None,
     ref_end: Fraction,
     part_cls: type[music21.stream.Part] = music21.stream.Part,
+    time_signature: str = TIME_SIGNATURE,
 ) -> music21.stream.Part:
     """1段ぶんの譜表を構築する(休符充填→記譜化→休符統合→stem付与)。"""
     part = part_cls()
     part.insert(0, clef_obj)
-    part.insert(0, music21.meter.TimeSignature(TIME_SIGNATURE))
+    part.insert(0, music21.meter.TimeSignature(time_signature))
     part.insert(0, music21.key.KeySignature(spell_key.sharps))
     if bpm is not None:
         part.insert(0, music21.tempo.MetronomeMark(number=float(bpm)))
@@ -251,7 +253,9 @@ def _build_staff(
     return notated
 
 
-def _drop_leading_silence(notes: Sequence[QuantizedNote]) -> list[QuantizedNote]:
+def _drop_leading_silence(
+    notes: Sequence[QuantizedNote], beats_per_measure: int = BEATS_PER_MEASURE
+) -> list[QuantizedNote]:
     """先頭の空小節ぶんだけ表示位置をシフトする(Issue #49: 弱起の巨大休符解消)。
 
     完全小節単位でのみシフトし、小節内の弱起(アウフタクト)は休符として
@@ -265,18 +269,18 @@ def _drop_leading_silence(notes: Sequence[QuantizedNote]) -> list[QuantizedNote]
     first = min(
         Fraction(float(n.start_beats)).limit_denominator(12) for n in notes
     )
-    lead_measures = int(first // BEATS_PER_MEASURE)
+    lead_measures = int(first // beats_per_measure)
     if lead_measures <= 0:
         return list(notes)
-    shift = lead_measures * BEATS_PER_MEASURE
+    shift = lead_measures * beats_per_measure
     return [
         dataclasses.replace(n, start_beats=float(n.start_beats) - float(shift))
         for n in notes
     ]
 
 
-def _measure_ceil(beats: Fraction) -> Fraction:
-    whole = Fraction(BEATS_PER_MEASURE)
+def _measure_ceil(beats: Fraction, beats_per_measure: int = BEATS_PER_MEASURE) -> Fraction:
+    whole = Fraction(beats_per_measure)
     measures = math.ceil(beats / whole) if beats > 0 else 1
     return whole * measures
 
@@ -285,9 +289,12 @@ def to_score(
     notes: Sequence[QuantizedNote],
     bpm: float,
     title: str | None = None,
+    beats_per_measure: int | None = None,
 ) -> music21.stream.Score:
-    """量子化済み音符列を4/4の五線譜スコアにする。
+    """量子化済み音符列を五線譜スコアにする。
 
+    拍子は beats_per_measure が None のとき estimate_meter で推定する
+    (アクセント周期からL/4を選択・確証が弱ければ4/4に退避。Issue #57/#59)。
     ピアノ音域(中央Cをまたぐ入力)は大譜表(ト音+ヘ音)にし、左右手を
     高さ基準で割り当てる。単一域の入力は1段のまま。曲名はmovement-titleへ。
     """
@@ -305,7 +312,9 @@ def to_score(
         score.insert(0, part.makeNotation(inPlace=False))
         return score
 
-    notes = _drop_leading_silence(notes)
+    bpmeas = beats_per_measure or estimate_meter(list(notes))
+    ts = f"{bpmeas}/4"
+    notes = _drop_leading_silence(notes, bpmeas)
     key = estimate_key(notes)
     treble, bass = split_hands(notes)
     ref_end = _measure_ceil(
@@ -313,7 +322,8 @@ def to_score(
             Fraction(float(n.start_beats)).limit_denominator(12)
             + Fraction(float(n.dur_beats)).limit_denominator(12)
             for n in notes
-        )
+        ),
+        bpmeas,
     )
 
     if treble and bass:
@@ -325,6 +335,7 @@ def to_score(
             bpm,
             ref_end,
             part_cls=music21.stream.PartStaff,
+            time_signature=ts,
         )
         lower = _build_staff(
             bass,
@@ -334,6 +345,7 @@ def to_score(
             None,
             ref_end,
             part_cls=music21.stream.PartStaff,
+            time_signature=ts,
         )
         group = music21.layout.StaffGroup(
             [upper, lower], symbol="brace", barTogether=True
@@ -357,6 +369,7 @@ def to_score(
             midline,
             bpm,
             ref_end,
+            time_signature=ts,
         ),
     )
     return score
