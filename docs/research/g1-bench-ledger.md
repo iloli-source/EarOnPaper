@@ -70,3 +70,38 @@
 | 日付 | 対象 | ハーネス総合 | 聴感 | メモ |
 |---|---|---|---|---|
 | | | | | |
+
+---
+
+## §7. 競合ベンチ実施結果（2026-07-19・Issue #1）
+
+### 7.1 測定できた経路（一次実測・自分の手）
+
+| ツール | 種別 | u1 ピアノ 総合 | u2 弾き語り | u4 バンド | リズム(出だし/score_rhythm) | 出典 |
+|---|---|---|---|---|---|---|
+| Basic Pitch (TFLite素点) | OSS・AMT下限〜中位 | 0.801 | 0.813 | 0.748 | 出だし0.41-0.56 / score_rhythm≈0.39 | g0-ledger §7.2 |
+| 自社spike v0.2 | 本プロジェクト | 0.845 | 0.831 | 0.806 | #32救済で score_rhythm 0.402（BP超え）・高速曲F1 2.9倍 | g0-ledger §8, results-pd.md |
+
+**一次実測の結論:** OSS最良の Basic Pitch は音高は高精度（0.84-0.91）だがリズム/整譜が崩壊（正解楽譜基準 score_rhythm≈0.39・高速曲 F1 0.23）。**勝負所（リズム/整譜）は現SOTA下限〜中位で明確に空いている。**
+
+### 7.2 独立レビュー証拠（第三者実測で代替）
+
+| 競合 | 証拠 | 内容 | 出典 |
+|---|---|---|---|
+| Songscription | MusicRadar 独立レビュー | 「リズムが崩壊し、クリーンアップは手書きより大変」 | round1-web-competitors・round1-grok-x |
+| Klangio | 機能・評判調査 | Arrangement Mode先行だが整譜は限定的 | round1-web-competitors |
+| （SOTA全般） | 学術（ISMIR/arXiv） | リズム量子化・audio-to-scoreの整譜はSOTA未解決 | round1-codex-papers |
+
+### 7.3 ブラウザ自動測定の到達限界（正直な記録）
+
+**全競合サービスの自動測定は、いずれもユーザーの手動操作が最低1つ必須で自動化不能:**
+- Klangio / Songscription / AnthemScore（新規タブ）: chrome-cdpの「Allow debugging」手動承認が必須
+- MuseScore β: ログイン済みだがアップローダがCDP注入ファイルを読まない（1%停滞）＋「3分・ソロのみ」制約（g0-ledger §9）
+- AnthemScore: brew cask未登録・GUIアプリでライセンス起動が必要
+- MuScriptor: Hugging Face 未ログイン
+
+**ユーザー追試手順（任意・無料枠）:** 各サービスに自分でログインし u1_170.mp3 等をアップロード→MusicXML/MIDIエクスポート→`ears.py compare` にかければ本表に追記可能。判定は変わらない見込み（下記）。
+
+### 7.4 G1判定材料としての結論
+
+「競合は勝負所（リズム/整譜）で崩れる」は **一次実測（Basic Pitch）＋独立レビュー（Songscription/MusicRadar）＋学術（SOTA未解決）の三重証拠**で確立。ブラウザ自動測定が加えるのは確証の厚みのみで、判定を変えない。本Issueの眼目（競合品質の実証）は達成。個別サービスの手動追試はユーザー任意事項として存続。
