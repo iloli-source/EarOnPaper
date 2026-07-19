@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-
 HARNESS_DIR = Path(__file__).resolve().parent.parent
 PYTHON = str(HARNESS_DIR / ".venv/bin/python")
 
