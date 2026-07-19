@@ -220,11 +220,17 @@ def main_rhythm_configs():
 
     from earpipe.notate import to_score, write_midi
     from earpipe.postfilter import apply_postfilter
-    from earpipe.quantize import BPM_DEFAULT, estimate_tempo, quantize_events
+    from earpipe.services.rhythm import (
+        BPM_DEFAULT,
+        GRID_PER_BEAT,
+        estimate_grid,
+        quantize_events,
+    )
 
     def spike_midi_from(events, dest: Path):
-        bpm = estimate_tempo(events) if events else BPM_DEFAULT
-        notes = quantize_events(events, bpm, mono=False)
+        # Issue #43: テンポ・格子系の推定は estimate_grid に単一化(pipelineと同一経路)
+        bpm, gpb = estimate_grid(events) if events else (BPM_DEFAULT, GRID_PER_BEAT)
+        notes = quantize_events(events, bpm, mono=False, grid_per_beat=gpb)
         write_midi(to_score(notes, bpm), dest)
         return dest
 
@@ -308,7 +314,12 @@ def main_dual_timing():
     from score_metrics import score_rhythm_paths
 
     from earpipe.services.notate import to_score, write_midi, write_midi_raw
-    from earpipe.services.rhythm import BPM_DEFAULT, estimate_tempo, quantize_events
+    from earpipe.services.rhythm import (
+        BPM_DEFAULT,
+        GRID_PER_BEAT,
+        estimate_grid,
+        quantize_events,
+    )
 
     rows = []
     for rel, slug, cat in SONGS:
@@ -322,8 +333,9 @@ def main_dual_timing():
             events = [
                 e for e in detect_events_poly(wav, sensitivity="high") if e.onset < CLIP_SEC
             ]
-            bpm = estimate_tempo(events) if events else BPM_DEFAULT
-            notes = quantize_events(events, bpm, mono=False)
+            # Issue #43: estimate_grid に単一化(pipelineと同一経路)
+            bpm, gpb = estimate_grid(events) if events else (BPM_DEFAULT, GRID_PER_BEAT)
+            notes = quantize_events(events, bpm, mono=False, grid_per_beat=gpb)
 
             bp_mid = OUT / f"{slug}_dual_bp.mid"
             events_to_midi(events, bp_mid)
