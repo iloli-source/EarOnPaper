@@ -53,3 +53,36 @@ class FieldReport:
     harmonic_ratio: float   # 音程を持ちうる成分の比率
     percussive_ratio: float  # 打撃様(非音程)成分の比率
     noise_like_ratio: float  # ノイズ様成分の比率
+
+
+# F-108: フィールド録音モードの音事件分類タグ(要件v2.7の6種)。
+# pitched_stable/pitched_transient は音符化対象、
+# noisy/inharmonic は音符化せず音響オブジェクトとして保持、
+# speech は声(採譜対象外)、poly は和音(オンデマンド分解)。
+SoundClass = Literal[
+    "pitched_stable",     # 安定した音程(持続音・単音の主対象)
+    "pitched_transient",  # 音程はあるが極短(撥弦アタック等)
+    "noisy",              # 広帯域雑音(雨・ヒス。音符化しない)
+    "speech",             # 声・発話(採譜対象外)
+    "poly",               # 多声(和音。オンデマンドで分解)
+    "inharmonic",         # 非調波(金属打・ノック。音符化しない)
+]
+
+# 音符化を許す分類タグ。noisy/inharmonic/speech は音響オブジェクトとして保持し
+# 五線化しない(F-108受入条件(1): 「拾えないものは拾えないと正直に言う」)。
+NOTABLE_CLASSES: frozenset[str] = frozenset({"pitched_stable", "pitched_transient", "poly"})
+
+
+@dataclass(frozen=True)
+class SoundEvent:
+    """音事件の分類結果(F-108・C8)。
+
+    音程を持つ成分だけを選択的に音符化するための前段判定。
+    分類はHPSS+スペクトル平坦度+調波性ヒューリスティックであり、
+    speech の識別は「有声だが調波ピークが不安定」という粗い代理であって
+    ASR相当ではない(限界はclassify_segmentのdocstringに明記)。
+    """
+
+    label: SoundClass
+    confidence: float       # 0-1: 分類の確からしさ(最有力クラスのスコア)
+    is_notable: bool        # 音符化を許すか(label in NOTABLE_CLASSES)

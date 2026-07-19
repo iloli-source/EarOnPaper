@@ -5,7 +5,7 @@
 「間違って書くより、書かないで正直に言う」設計原則(product-vision)。
 """
 
-from earpipe.contracts import PitchEvent
+from earpipe.contracts import NOTABLE_CLASSES, PitchEvent, SoundEvent
 
 # 閾値はfield.pyの実SNRスケール(dB)と同期(#45で無音率検出器から作り直し20/10dBに再較正)
 _SNR_CLEAN_DB = 20.0     # field.py._SNR_CLEAN_DB と同値(サービス境界のため定数重複。変更時は両方)
@@ -35,3 +35,18 @@ def select_events(events: list[PitchEvent], snr_db: float) -> list[PitchEvent]:
         for e in events
         if e.confidence >= min_conf and (e.offset - e.onset) >= min_dur
     ]
+
+
+def gate_by_class(sound: SoundEvent, allow_poly: bool = False) -> bool:
+    """音事件の分類タグに基づき「音符化してよいか」を返す(F-108受入条件(1)(3))。
+
+    - noisy/inharmonic/speech は音符化しない(音響オブジェクトとして別途保持)。
+    - 既定は単音抽出優先: poly(和音)は音符化を保留し、失望を防ぐ
+      (allow_poly=True でオンデマンド分解を許可)。
+    - pitched_stable/pitched_transient は常に音符化を許す。
+
+    「間違って書くより、書かないで正直に言う」設計原則(product-vision)の実装。
+    """
+    if sound.label == "poly":
+        return allow_poly
+    return sound.label in NOTABLE_CLASSES
