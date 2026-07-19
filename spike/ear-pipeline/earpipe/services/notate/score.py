@@ -5,6 +5,7 @@
 """
 
 from collections.abc import Sequence
+from fractions import Fraction
 from pathlib import Path
 
 import music21
@@ -51,8 +52,9 @@ def to_score(notes: Sequence[QuantizedNote], bpm: float) -> music21.stream.Score
                 el = music21.note.Note(spell_midi(midis[0], key))
             else:
                 el = music21.chord.Chord([spell_midi(m, key) for m in midis])
-            el.quarterLength = dur
-            part.insert(start, el)
+            # 三連格子(1/3拍)の浮動小数を有理数に固定してmusic21の連符表現を安定させる(#39)
+            el.quarterLength = Fraction(dur).limit_denominator(12)
+            part.insert(Fraction(start).limit_denominator(12), el)
     else:
         part.insert(0, music21.note.Rest(quarterLength=4.0))
 

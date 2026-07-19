@@ -12,7 +12,7 @@ from pathlib import Path
 
 from earpipe.services.ear import apply_postfilter, detect_events, detect_events_poly, select_events
 from earpipe.services.notate import to_score, write_midi, write_midi_raw, write_musicxml
-from earpipe.services.rhythm import BPM_DEFAULT, estimate_tempo, quantize_events
+from earpipe.services.rhythm import BPM_DEFAULT, GRID_PER_BEAT, estimate_grid, quantize_events
 from earpipe.services.stem import analyze_field, denoise, load_audio
 
 
@@ -54,10 +54,13 @@ def transcribe_file(
         events = select_events(events, analysis.snr_db)
 
     if events:
-        bpm = estimate_tempo(events)
-        notes = quantize_events(events, bpm, mono=(engine == "mono"))
+        bpm, grid_per_beat = estimate_grid(events)  # 格子系(2分/3分)も同時推定(#39)
+        notes = quantize_events(
+            events, bpm, mono=(engine == "mono"), grid_per_beat=grid_per_beat
+        )
     else:
         bpm = BPM_DEFAULT
+        grid_per_beat = GRID_PER_BEAT
         notes = []
 
     score = to_score(notes, bpm)
@@ -76,6 +79,7 @@ def transcribe_file(
         "n_events": len(events),
         "n_notes": len(notes),
         "bpm": bpm,
+        "grid_per_beat": grid_per_beat,
         "timing": timing,
         "notes": notes,
     }
