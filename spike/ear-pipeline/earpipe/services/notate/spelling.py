@@ -30,7 +30,9 @@ def estimate_key(notes: Sequence[QuantizedNote]) -> music21.key.Key:
         s.insert(float(n.start_beats), el)
     try:
         key = s.analyze("key")
-    except Exception:
+    except music21.analysis.discrete.DiscreteAnalysisException:
+        # KS推定が成立しない入力(単一音の反復等)のみ既定調へ。
+        # それ以外の例外は握りつぶさず表面化させる(レビュー#40 M1)
         return music21.key.Key("C")
     return _normalize_enharmonic_key(key)
 
@@ -45,6 +47,20 @@ def _normalize_enharmonic_key(key: music21.key.Key) -> music21.key.Key:
         return key
     tonic = key.tonic.getEnharmonic()
     return music21.key.Key(tonic.name, key.mode)
+
+
+_SCALE_NAME_CACHE: dict[str, frozenset[str]] = {}
+
+
+def _scale_names(key: music21.key.Key) -> frozenset[str]:
+    """調→音階構成音名の集合。spell_midiが音符ごとに音階を再構築しないためのキャッシュ
+    (レビュー#40 M3)。"""
+    cache_key = f"{key.tonic.name}:{key.mode}"
+    if cache_key not in _SCALE_NAME_CACHE:
+        _SCALE_NAME_CACHE[cache_key] = frozenset(
+            p.name for p in key.getScale().getPitches()
+        )
+    return _SCALE_NAME_CACHE[cache_key]
 
 
 def spell_midi(midi: int, key: music21.key.Key) -> music21.pitch.Pitch:
@@ -69,7 +85,7 @@ def spell_midi(midi: int, key: music21.key.Key) -> music21.pitch.Pitch:
     if not simple:
         return base
 
-    scale_names = {p.name for p in key.getScale().getPitches()}
+    scale_names = _scale_names(key)
 
     def rank(p: music21.pitch.Pitch) -> tuple[int, int, int]:
         in_scale = 0 if p.name in scale_names else 1
@@ -83,6 +99,8 @@ def spell_midi(midi: int, key: music21.key.Key) -> music21.pitch.Pitch:
         return (in_scale, direction, abs(int(p.alter)))
 
     best = min(simple, key=rank)
-    # octaveを維持(getEnharmonicはoctaveを保持するがmidi一致を最終確認)
-    assert best.midi == int(midi)
+    # midi一致の最終確認。assertは-O実行で消えるため明示チェックで安全側へ倒す
+    # (万一の不一致は綴りより音高が正しいことを優先しbaseへフォールバック。レビュー#40 M2)
+    if best.midi != int(midi):
+        return base
     return best

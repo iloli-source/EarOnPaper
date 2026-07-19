@@ -90,3 +90,17 @@ class TestScoreIntegration:
         assert "<fifths>1</fifths>" in xml
         reparsed = music21.converter.parse(str(out))
         assert len(list(reparsed.recurse().notes)) > 0
+
+
+class TestReview40MidiPreservation:
+    """レビュー#40 M2: spell_midiは全音高・代表調でMIDI音高を必ず保存する
+    (assert撤去後の明示フォールバックの検証)。"""
+
+    @pytest.mark.parametrize("key_name,mode", [
+        ("C", "major"), ("G", "major"), ("D-", "major"),
+        ("a", "minor"), ("e", "minor"), ("b-", "minor"),
+    ])
+    def test_spell_preserves_midi_for_all_semitones(self, key_name, mode):
+        key = music21.key.Key(key_name, mode)
+        for midi in range(48, 84):
+            assert spell_midi(midi, key).midi == midi

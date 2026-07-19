@@ -7,9 +7,10 @@
 
 from earpipe.contracts import PitchEvent
 
-_CONF_CLEAN = 0.50       # SNR>=20dB: 既定と同じ
-_CONF_NOISY = 0.55       # 10-20dB
-_CONF_VERY_NOISY = 0.58  # <10dB
+# 閾値はfield.pyの内部SNRプロキシ値基準(絶対dBではない。クリーン系≈9で飽和する実測スケール)
+_CONF_CLEAN = 0.50       # プロキシ>=8.0(clean): 既定と同じ
+_CONF_NOISY = 0.55       # 6.0-8.0(noisy)
+_CONF_VERY_NOISY = 0.58  # <6.0(very_noisy)
 _MIN_DUR_NOISY = 0.10    # 雑音下では極短イベントも捨てる(秒)
 
 

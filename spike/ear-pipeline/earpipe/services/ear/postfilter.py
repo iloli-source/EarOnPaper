@@ -32,12 +32,16 @@ def merge_splits(
     merged: list[PitchEvent] = []
     for pitch_events in by_pitch.values():
         run = [pitch_events[0]]
+        run_end = pitch_events[0].offset
         for e in pitch_events[1:]:
-            if e.onset - run[-1].offset <= max_gap:
+            # 包含イベントがあるためrun終端は逐次maxで追跡する(レビュー#40 M8)
+            if e.onset - run_end <= max_gap:
                 run.append(e)
+                run_end = max(run_end, e.offset)
             else:
                 merged.append(_merge_run(run))
                 run = [e]
+                run_end = e.offset
         merged.append(_merge_run(run))
     return sorted(merged, key=lambda e: (e.onset, e.midi))
 
@@ -47,7 +51,9 @@ def _merge_run(run: list[PitchEvent]) -> PitchEvent:
         return run[0]
     return PitchEvent(
         onset=run[0].onset,
-        offset=run[-1].offset,
+        # 包含イベント(長い音の中に短い再トリガー)ではrun末尾のoffsetが
+        # 最大とは限らないためmaxを取る(レビュー#40 M8)
+        offset=max(e.offset for e in run),
         midi=run[0].midi,
         confidence=max(e.confidence for e in run),
     )

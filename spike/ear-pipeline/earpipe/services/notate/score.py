@@ -4,6 +4,7 @@
 記譜法の追加(TAB/简谱等)は出力プロファイル層の将来拡張(NF-045)。
 """
 
+import math
 from collections.abc import Sequence
 from fractions import Fraction
 from pathlib import Path
@@ -83,9 +84,7 @@ def write_midi_raw(
     正解音源とのタイミング比較(F1@100ms等)に格子化ロスが混入しない。
     実秒を持たない旧型データ(NaN)は bpm による格子秒へフォールバックする。
     """
-    import math
-
-    import pretty_midi
+    import pretty_midi  # 重い依存のため遅延import(モジュールロードを軽く保つ)
 
     pm = pretty_midi.PrettyMIDI(initial_tempo=float(bpm))
     inst = pretty_midi.Instrument(program=0)

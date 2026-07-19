@@ -74,15 +74,8 @@ def estimate_tempo(
 
     限界: 一定テンポを仮定する。ルバート・テンポ変化曲は範囲外(READMEに記録)。
     """
-    hi = [e for e in events if e.confidence >= CONFIDENCE_FLOOR]
-    use = hi if len(hi) >= MIN_HI_CONF_EVENTS else events
-
-    times = _cluster_onsets(use)
-    if len(times) < 3:
-        return BPM_DEFAULT
-    diffs = np.diff(np.asarray(times))
-    iois = diffs[(diffs >= IOI_MIN_SEC) & (diffs <= IOI_MAX_SEC)]
-    if len(iois) < 2:
+    iois = _prep_iois(events)
+    if iois is None:
         return BPM_DEFAULT
 
     bpms = np.arange(bpm_min, bpm_max + 0.25, 0.5)

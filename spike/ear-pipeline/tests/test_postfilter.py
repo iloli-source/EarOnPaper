@@ -160,3 +160,29 @@ class TestSensitivity:
         base = f1_of(detect_events_poly(path))
         both = f1_of(apply_postfilter(detect_events_poly(path, sensitivity="high")))
         assert both >= base - 0.05  # 救済+除去の複合で悪化しないこと
+
+
+class TestReview40Regressions:
+    """レビュー#40の修正回帰(M8: 包含イベントのマージ)。"""
+
+    def test_merge_contained_retrigger_keeps_long_offset(self):
+        # 長い音(0-2.0s)の中に短い再トリガー(0.5-0.7s)が包含されるケース。
+        # 旧実装はrun末尾のoffset(0.7)を採用し音が縮んでいた。
+        events = [
+            PitchEvent(onset=0.0, offset=2.0, midi=60, confidence=0.9),
+            PitchEvent(onset=0.5, offset=0.7, midi=60, confidence=0.5),
+        ]
+        merged = merge_splits(events)
+        assert len(merged) == 1
+        assert merged[0].offset == 2.0
+
+    def test_merge_gap_tracks_run_end_not_last_offset(self):
+        # 包含イベントの後、真のrun終端(2.0)からgap内(2.05)の音は同一runに入るべき
+        events = [
+            PitchEvent(onset=0.0, offset=2.0, midi=60, confidence=0.9),
+            PitchEvent(onset=0.5, offset=0.7, midi=60, confidence=0.5),
+            PitchEvent(onset=2.05, offset=2.3, midi=60, confidence=0.8),
+        ]
+        merged = merge_splits(events)
+        assert len(merged) == 1
+        assert merged[0].offset == 2.3

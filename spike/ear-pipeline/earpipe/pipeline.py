@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 from earpipe.services.ear import apply_postfilter, detect_events, detect_events_poly, select_events
-from earpipe.services.notate import to_score, write_midi, write_midi_raw, write_musicxml
+from earpipe.services.notate import to_score, write_midi, write_midi_raw, write_musicxml, write_pdf
 from earpipe.services.rhythm import BPM_DEFAULT, GRID_PER_BEAT, estimate_grid, quantize_events
 from earpipe.services.stem import analyze_field, denoise, load_audio
 
@@ -20,6 +20,7 @@ def transcribe_file(
     in_path: str | Path,
     out_musicxml: str | Path | None = None,
     out_midi: str | Path | None = None,
+    out_pdf: str | Path | None = None,
     engine: str = "mono",
     sensitivity: str = "normal",
     postfilter: bool = False,
@@ -33,19 +34,29 @@ def transcribe_file(
     PD15曲実測で倍音フィルタが本物のオクターブ重ねを誤除去し平均で逆効果だったため
     (bench_out/results_rhythm_configs.json)。合成ケースでは設計どおり動くため
     オプトインで残し、再設計の方向性は Issue #31 クローズコメントに記録。
+
+    field_mode の制約(レビュー#40 M7): 降噪(denoise)が効くのは mono 経路のみ。
+    poly は bp_worker がファイルパス入力のため降噪波形を渡せず、SNR適応の
+    選択フィルタ(select_events)のみ適用される。降噪波形の一時ファイル経由は
+    将来課題。
     戻り値: engine / n_events / n_notes / bpm / notes。
     """
     analysis = None
+    y_loaded = None
     if field_mode:
-        y_field, sr_field = load_audio(in_path)
-        analysis = analyze_field(y_field, sr_field)
+        y_loaded, sr_loaded = load_audio(in_path)
+        analysis = analyze_field(y_loaded, sr_loaded)
 
     if engine == "poly":
         events = detect_events_poly(in_path, sensitivity=sensitivity)
         if postfilter:
             events = apply_postfilter(events)
     else:
-        y, sr = load_audio(in_path)
+        # field_mode時は分析でロード済みの波形を再利用する(二重ロード回避)
+        if y_loaded is not None:
+            y, sr = y_loaded, sr_loaded
+        else:
+            y, sr = load_audio(in_path)
         if field_mode:
             y = denoise(y, sr)
         events = detect_events(y, sr)
@@ -85,6 +96,10 @@ def transcribe_file(
     }
     if analysis is not None:
         result["field_report"] = asdict(analysis.report)
+    if out_pdf:
+        if not out_musicxml:
+            raise ValueError("--pdf にはMusicXML出力(-o)が必要")
+        result["engrave"] = write_pdf(out_musicxml, out_pdf)
     return result
 
 
@@ -95,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     pt.add_argument("input", help="入力音声(wav/mp3等)")
     pt.add_argument("-o", "--output", help="MusicXML出力先(既定: 入力名.musicxml)")
     pt.add_argument("--midi", help="MIDI出力先(任意)")
+    pt.add_argument("--pdf", help="五線譜PDF出力先(任意。ADR-004: Verovio)")
     pt.add_argument(
         "--field-mode", action="store_true",
         help="フィールド録音モード(C8): SNR適応の選択的抽出+非音程成分の分類報告",
@@ -122,6 +138,7 @@ def main(argv: list[str] | None = None) -> int:
         args.input,
         out_musicxml=out,
         out_midi=args.midi,
+        out_pdf=args.pdf,
         engine=args.engine,
         sensitivity=args.sensitivity,
         postfilter=args.postfilter,

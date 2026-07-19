@@ -4,6 +4,7 @@
 """
 
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,10 @@ class QuantizedNote:
     背景: PD15曲実測で格子スナップが音符を正解タイミングから引き剥がすことを確認
     (results-pd.md)。格子は「楽譜にするため」の表現であり、データとしての
     実タイミングを破壊してはならない。旧4引数構築との互換のため実側は既定NaN。
+
+    注意(レビュー#40 L1): NaN != NaN のため、実側が未設定(NaN)同士の
+    インスタンスは他フィールドが同一でも == で等しくならない。同一性判定は
+    (start_beats, midi) 等の格子側キーで行うこと(quantizeのdedupはこの方式)。
     """
 
     start_beats: float
@@ -43,8 +48,8 @@ class FieldReport:
     比率は入力エネルギーに対する概算(HPSS+スペクトル平坦度によるヒューリスティック)。
     """
 
-    snr_db: float           # 推定SNR(dB)。大きいほどクリーン
-    noise_profile: str      # "clean" / "noisy" / "very_noisy"
+    snr_db: float           # 推定SNR(内部プロキシ値)。大きいほどクリーン
+    noise_profile: Literal["clean", "noisy", "very_noisy"]  # レビュー#40 L2: 型で値域を固定
     harmonic_ratio: float   # 音程を持ちうる成分の比率
     percussive_ratio: float  # 打撃様(非音程)成分の比率
     noise_like_ratio: float  # ノイズ様成分の比率

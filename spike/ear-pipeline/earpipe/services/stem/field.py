@@ -39,11 +39,23 @@ def _estimate_snr_db(rms: np.ndarray) -> float:
     return float(20.0 * np.log10(hi / lo))
 
 
+def _to_mono(y: np.ndarray) -> np.ndarray:
+    """ステレオ入力をモノラルへ畳む。(frames, ch)/(ch, frames)の両配置に対応
+    (soundfileとlibrosaで軸配置が逆のため。レビュー#40 M4)。"""
+    if y.ndim <= 1:
+        return y
+    # チャンネル軸=要素数が少ない側(2ch程度)とみなす
+    ch_axis = int(np.argmin(y.shape))
+    return y.mean(axis=ch_axis)
+
+
 def analyze_field(y: np.ndarray, sr: int) -> FieldAnalysis:
-    """波形を分析し、SNR推定と成分分類(FieldReport)を返す。"""
-    y = np.asarray(y, dtype=np.float64)
-    if y.ndim > 1:
-        y = y.mean(axis=1)
+    """波形を分析し、SNR推定と成分分類(FieldReport)を返す。
+
+    sr は現状未使用(n_fft/hopは固定)だが、契約としてサンプルレートを受け取る。
+    22.05k/44.1k両系で動作確認済み(時間分解能のみ変わる)。
+    """
+    y = _to_mono(np.asarray(y, dtype=np.float64))
     if len(y) == 0 or float(np.max(np.abs(y))) < 1e-9:
         report = FieldReport(0.0, "very_noisy", 0.0, 0.0, 0.0)
         return FieldAnalysis(0.0, "very_noisy", report)
@@ -86,8 +98,9 @@ def denoise(y: np.ndarray, sr: int) -> np.ndarray:
 
     フィールド録音モードの前処理。雑音下でのpYIN崩壊(検出消失)を救済する。
     クリーン音源には実質無害(雑音床が小さいため差し引きも小さい)。
+    1フレーム未満(2048サンプル)の入力は降噪せずそのまま返す。
     """
-    y = np.asarray(y, dtype=np.float64)
+    y = _to_mono(np.asarray(y, dtype=np.float64))
     if len(y) < 2048:
         return y
     S = librosa.stft(y, n_fft=2048, hop_length=512)

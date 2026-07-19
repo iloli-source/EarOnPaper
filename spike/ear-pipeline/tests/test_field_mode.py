@@ -209,3 +209,20 @@ class TestPipelineIntegration:
         sf.write(wav, clean_melody, SR)
         result = transcribe_file(wav)
         assert "field_report" not in result
+
+
+class TestReview40StereoInput:
+    """レビュー#40 M4: ステレオ入力の軸配置(frames,ch)/(ch,frames)両対応。"""
+
+    def test_analyze_field_stereo_both_orientations_match_mono(self):
+        rng = np.random.default_rng(42)
+        mono = rng.standard_normal(SR * 2) * 0.1
+        from earpipe.services.stem import analyze_field
+
+        ref = analyze_field(mono, SR)
+        frames_ch = analyze_field(np.stack([mono, mono], axis=1), SR)   # (frames, 2)
+        ch_frames = analyze_field(np.stack([mono, mono], axis=0), SR)   # (2, frames)
+        assert frames_ch.noise_profile == ref.noise_profile
+        assert ch_frames.noise_profile == ref.noise_profile
+        assert abs(frames_ch.snr_db - ref.snr_db) < 0.5
+        assert abs(ch_frames.snr_db - ref.snr_db) < 0.5
