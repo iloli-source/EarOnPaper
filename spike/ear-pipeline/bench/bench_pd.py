@@ -155,7 +155,8 @@ def main():
     print("saved results.json")
 
 
-if __name__ == "__main__" and "--score-rhythm" not in sys.argv:
+_MODES = {"--score-rhythm", "--rhythm-configs"}
+if __name__ == "__main__" and not (_MODES & set(sys.argv)):
     main()
 
 
@@ -204,4 +205,90 @@ def main_score_rhythm():
 
 if __name__ == "__main__" and "--score-rhythm" in sys.argv:
     main_score_rhythm()
+    sys.exit(0)
+
+
+def main_rhythm_configs():
+    """#31/#32 の効果測定: 4構成の前後比較(正解基準)。
+
+    構成: bp素点 / spike基本(量子化のみ) / +幽霊除去(#31) / +高感度(#32) / 両方
+    指標: Note F1@100ms(正解MIDI基準) と score_rhythm(楽譜レベルKPI #33)
+    使い方: python bench_pd.py --rhythm-configs
+    """
+    sys.path.insert(0, str(ROOT / "tools" / "ai-ears"))
+    from score_metrics import score_rhythm_paths
+
+    from earpipe.notate import to_score, write_midi
+    from earpipe.postfilter import apply_postfilter
+    from earpipe.quantize import BPM_DEFAULT, estimate_tempo, quantize_events
+
+    def spike_midi_from(events, dest: Path):
+        bpm = estimate_tempo(events) if events else BPM_DEFAULT
+        notes = quantize_events(events, bpm, mono=False)
+        write_midi(to_score(notes, bpm), dest)
+        return dest
+
+    configs = ["bp", "base", "ghost", "rescue", "both"]
+    rows = []
+    for rel, slug, cat in SONGS:
+        gt_path = CORPUS / f"{rel}.mid"
+        wav = OUT / f"{slug}.wav"
+        if not (gt_path.exists() and wav.exists()):
+            rows.append({"slug": slug, "cat": cat, "status": "cache missing"})
+            continue
+        try:
+            gt = midi_notes(gt_path)
+            normal = [e for e in detect_events_poly(wav) if e.onset < CLIP_SEC]
+            high = [
+                e for e in detect_events_poly(wav, sensitivity="high") if e.onset < CLIP_SEC
+            ]
+            variants = {
+                "bp": None,  # 素点はイベントそのまま(量子化なし)
+                "base": normal,
+                "ghost": apply_postfilter(normal),
+                "rescue": high,
+                "both": apply_postfilter(high),
+            }
+            row = {"slug": slug, "cat": cat, "gt_notes": len(gt), "status": "ok"}
+            for name in configs:
+                mid = OUT / f"{slug}_cfg_{name}.mid"
+                if name == "bp":
+                    events_to_midi(normal, mid)
+                else:
+                    spike_midi_from(variants[name], mid)
+                pred = midi_notes(mid)
+                f1, p_, r_ = note_f1(gt, pred, 0.1)
+                sr_ = score_rhythm_paths(gt_path, mid)
+                row[f"{name}_f1"] = round(f1, 3)
+                row[f"{name}_p"] = round(p_, 3)
+                row[f"{name}_r"] = round(r_, 3)
+                row[f"{name}_sr"] = sr_["total"]
+            rows.append(row)
+            print(
+                f"{slug}: f1 bp={row['bp_f1']} base={row['base_f1']} ghost={row['ghost_f1']} "
+                f"rescue={row['rescue_f1']} both={row['both_f1']}"
+            )
+        except Exception as e:  # 1曲の失敗で全体を止めない(失敗は正直に記録)
+            rows.append({"slug": slug, "cat": cat, "status": f"FAIL {type(e).__name__}: {e}"})
+            print(f"{slug}: FAIL {e}")
+
+    ok = [r for r in rows if r["status"] == "ok"]
+    if ok:
+        print(f"\n# rhythm-configs 集計 (n={len(ok)})")
+        print("| 構成 | F1@100ms平均 | precision平均 | recall平均 | score_rhythm平均 |")
+        print("|---|---|---|---|---|")
+        for name in configs:
+            af1 = sum(r[f"{name}_f1"] for r in ok) / len(ok)
+            ap = sum(r[f"{name}_p"] for r in ok) / len(ok)
+            ar = sum(r[f"{name}_r"] for r in ok) / len(ok)
+            asr = sum(r[f"{name}_sr"] for r in ok) / len(ok)
+            print(f"| {name} | {af1:.3f} | {ap:.3f} | {ar:.3f} | {asr:.3f} |")
+    (OUT / "results_rhythm_configs.json").write_text(
+        json.dumps(rows, ensure_ascii=False, indent=1)
+    )
+    print("saved results_rhythm_configs.json")
+
+
+if __name__ == "__main__" and "--rhythm-configs" in sys.argv:
+    main_rhythm_configs()
     sys.exit(0)
