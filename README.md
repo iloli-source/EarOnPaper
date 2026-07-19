@@ -1,4 +1,6 @@
-# Pitchsieve — 採譜プロジェクト (AI Music Transcription)
+# EarOnPaper — 採譜プロジェクト (AI Music Transcription)
+
+> *Transcribing the world into music.* 製品名: **EarOnPaper**（ユーザー決定 2026-07-19）/ 耳エンジンのコードネーム: **Pitchsieve**
 
 **絶対音感エミュレータ** — 雑音を含む日常録音から、絶対音感を持つ人のように音程成分だけを選択的に抽出して楽譜にする。非音楽家がターゲット。詳細: [プロダクトビジョン](docs/requirements/product-vision.md)
 
