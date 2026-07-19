@@ -158,3 +158,58 @@ class TestVoiceSanity:
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+class TestIssue49Layout:
+    """Issue #49: 弱起の巨大休符解消と小ギャップ吸収。"""
+
+    @staticmethod
+    def _qn(midi, start, dur):
+        import math
+
+        from earpipe.contracts import QuantizedNote
+
+        return QuantizedNote(midi=midi, start_beats=start, dur_beats=dur,
+                             confidence=0.9, onset_sec=math.nan, offset_sec=math.nan)
+
+    def test_leading_full_measures_are_dropped(self):
+        # 先頭2小節ぶんの無音(弱起入力)が巨大休符にならず、シフトされる
+        import music21
+
+        from earpipe.services.notate.score import to_score
+
+        score = to_score([self._qn(72, 9.5, 1.0), self._qn(74, 11.0, 1.0)], bpm=120)
+        part = score.parts[0]
+        measures = list(part.recurse().getElementsByClass(music21.stream.Measure))
+        first_with_note = next(
+            m.measureNumber for m in measures if list(m.recurse().notes)
+        )
+        assert first_with_note == 1  # 旧実装では3小節目まで音がない
+
+    def test_small_gap_absorbed_into_previous_note(self):
+        # 0.25拍のギャップ(オフセット検出の切れ端)は前の音の持続に吸収される
+        from earpipe.services.notate.score import to_score
+
+        score = to_score([self._qn(72, 0.0, 0.75), self._qn(74, 1.0, 1.0)], bpm=120)
+        part = score.parts[0]
+        notes = list(part.recurse().notes)
+        assert float(notes[0].quarterLength) == 1.0  # 0.75→1.0に延長
+        import music21
+
+        m1 = list(part.recurse().getElementsByClass(music21.stream.Measure))[0]
+        rest_len = sum(float(r.quarterLength) for r in m1.recurse().getElementsByClass(music21.note.Rest))
+        assert rest_len <= 2.0  # 音間の断片休符が消えている(残るのは末尾のみ)
+
+    def test_large_gap_keeps_rest(self):
+        # 2拍の本物のギャップは吸収せず休符として残す(音価の嘘をつかない)
+        import music21
+
+        from earpipe.services.notate.score import to_score
+
+        score = to_score([self._qn(72, 0.0, 1.0), self._qn(74, 3.0, 1.0)], bpm=120)
+        part = score.parts[0]
+        notes = list(part.recurse().notes)
+        assert float(notes[0].quarterLength) == 1.0  # 延長されない
+        m1 = list(part.recurse().getElementsByClass(music21.stream.Measure))[0]
+        rests = list(m1.recurse().getElementsByClass(music21.note.Rest))
+        assert rests  # ギャップの休符が実在

@@ -73,3 +73,71 @@ class TestEngraveE2E:
         wav, _melody, _bpm = simple_wav
         with pytest.raises(ValueError):
             transcribe_file(wav, out_musicxml=None, out_pdf=tmp_path / "x.pdf")
+
+
+class TestIssue49Engrave:
+    """Issue #49: 豆腐化対策とsvg_note_count計数修正。"""
+
+    def _render_two_note_svg(self, tmp_path):
+        import math
+
+        from earpipe.contracts import QuantizedNote
+        from earpipe.services.notate.engrave import render_svg_pages
+        from earpipe.services.notate.score import to_score, write_musicxml
+
+        nan = math.nan
+        notes = [
+            QuantizedNote(midi=72, start_beats=0.0, dur_beats=1.0, confidence=0.9,
+                          onset_sec=nan, offset_sec=nan),
+            QuantizedNote(midi=76, start_beats=1.0, dur_beats=1.0, confidence=0.9,
+                          onset_sec=nan, offset_sec=nan),
+        ]
+        xml = tmp_path / "two.musicxml"
+        write_musicxml(to_score(notes, bpm=119.5, title="Two"), xml)
+        return render_svg_pages(xml)[0]
+
+    def test_svg_note_count_excludes_noteheads(self, tmp_path):
+        # notehead は note の前方一致に含まれ2倍計数されていた(P2)
+        from earpipe.services.notate.engrave import svg_note_count
+
+        svg = self._render_two_note_svg(tmp_path)
+        assert svg_note_count(svg) == 2
+
+    def test_plain_tempo_svg_removes_music_font(self, tmp_path):
+        # cairosvgが解決できないSMuFLグリフ(Leipzig)をテンポ表記から除去し
+        # ASCIIの "BPM <n>" にフォールバックする(P1: 豆腐ゼロ)
+        from earpipe.services.notate.engrave import plain_tempo_svg
+
+        svg = self._render_two_note_svg(tmp_path)
+        assert 'font-family="Leipzig"' in svg  # 前提: 素のVerovio出力にはグリフがある
+        out = plain_tempo_svg(svg)
+        assert 'font-family="Leipzig"' not in out
+        assert "BPM" in out
+
+    def test_write_pdf_and_png_apply_plain_tempo(self, tmp_path, monkeypatch):
+        # write_pdf / write_png_preview の経路でも豆腐フォントが残らない
+        import earpipe.services.notate.engrave as eng
+
+        captured: list[str] = []
+        real_svg2pdf = None
+        import cairosvg
+
+        real_svg2pdf = cairosvg.svg2pdf
+
+        def spy(bytestring=None, **kw):
+            captured.append(bytestring.decode("utf-8"))
+            return real_svg2pdf(bytestring=bytestring, **kw)
+
+        monkeypatch.setattr(cairosvg, "svg2pdf", spy)
+        import math
+
+        from earpipe.contracts import QuantizedNote
+        from earpipe.services.notate.score import to_score, write_musicxml
+
+        nan = math.nan
+        notes = [QuantizedNote(midi=72, start_beats=0.0, dur_beats=1.0, confidence=0.9,
+                               onset_sec=nan, offset_sec=nan)]
+        xml = tmp_path / "one.musicxml"
+        write_musicxml(to_score(notes, bpm=100.0, title="One"), xml)
+        eng.write_pdf(xml, tmp_path / "one.pdf")
+        assert captured and all('font-family="Leipzig"' not in s for s in captured)

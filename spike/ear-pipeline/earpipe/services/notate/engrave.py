@@ -6,6 +6,7 @@
 """
 
 import io
+import re
 from pathlib import Path
 
 # デフォルトのレンダリングオプション。A4縦・余白は控えめ（一次画面=五線のデフォルト表示に準拠）
@@ -35,8 +36,35 @@ def render_svg_pages(musicxml_path: str | Path) -> list[str]:
 
 
 def svg_note_count(svg: str) -> int:
-    """SVG内の音符要素（notehead）の概数。テスト・健全性検査用の代理指標。"""
-    return svg.count('class="note')
+    """SVG内の音符要素の数。テスト・健全性検査用の代理指標。
+
+    Issue #49(P2): 旧実装の前方一致 `class="note` は `class="notehead"` も
+    拾って2倍計数していた。単語境界つきで note 要素のみ数える。
+    """
+    return len(re.findall(r'class="note[\s"]', svg))
+
+
+# cairosvg はSMuFL音楽フォント(Leipzig)を解決できず、テンポ記号の♩が
+# 豆腐(□)化する(Issue #49 P1)。MusicXMLデータには<metronome>を残しつつ、
+# 描画直前のSVGだけASCIIの "BPM <n>" 表記へフォールバックする。
+_MUSIC_FONT_TSPAN = re.compile(
+    r'<tspan[^>]*font-family="(?:Leipzig|VerovioText)[^"]*"[^>]*>[^<]*</tspan>'
+)
+_TEMPO_EQ_TEXT = re.compile(r'(<tspan[^>]*>)\s*=\s*(</?tspan)')
+
+
+def plain_tempo_svg(svg: str) -> str:
+    """テンポ表記のSMuFLグリフを除去し 'BPM <数値>' のASCII表記に変換する。"""
+
+    def _fix_tempo_block(m: re.Match[str]) -> str:
+        block = m.group(0)
+        block = _MUSIC_FONT_TSPAN.sub("", block)
+        block = re.sub(r">(\s*=\s*)<", ">BPM <", block)
+        return block
+
+    return re.sub(
+        r'<g[^>]*class="tempo"[^>]*>.*?</g>', _fix_tempo_block, svg, flags=re.S
+    )
 
 
 def write_pdf(musicxml_path: str | Path, out_pdf: str | Path) -> dict:
@@ -44,7 +72,7 @@ def write_pdf(musicxml_path: str | Path, out_pdf: str | Path) -> dict:
     import cairosvg
     from pypdf import PdfWriter
 
-    svgs = render_svg_pages(musicxml_path)
+    svgs = [plain_tempo_svg(s) for s in render_svg_pages(musicxml_path)]
     writer = PdfWriter()
     for svg in svgs:
         page_pdf = cairosvg.svg2pdf(bytestring=svg.encode("utf-8"))
@@ -69,7 +97,7 @@ def write_png_preview(musicxml_path: str | Path, out_png: str | Path, page: int 
     """指定ページのPNGプレビューを生成する（確認・デモ用）。"""
     import cairosvg
 
-    svgs = render_svg_pages(musicxml_path)
+    svgs = [plain_tempo_svg(s) for s in render_svg_pages(musicxml_path)]
     idx = max(1, min(page, len(svgs))) - 1
     out_png = Path(out_png)
     out_png.parent.mkdir(parents=True, exist_ok=True)

@@ -38,6 +38,9 @@ _REST_DURATIONS: tuple[Fraction, ...] = (
     Fraction(1, 12),
 )
 _MIN_DUR = Fraction(1, 12)
+# ギャップ吸収の上限(拍)。オフセット検出の切れ端(≤半拍)は前の音の持続に
+# 吸収し(legato解釈・Issue #49)、それを超える本物の休符は保存する。
+_GAP_FILL_MAX = Fraction(1, 2)
 
 
 def _group_simultaneous(
@@ -105,6 +108,25 @@ def _cap_overlaps(
             gap = groups[i + 1][0] - start
             if dur > gap:
                 dur = max(gap, _MIN_DUR)
+        out.append((start, dur, midis))
+    return out
+
+
+def _fill_small_gaps(
+    groups: list[tuple[Fraction, Fraction, list[int]]],
+) -> list[tuple[Fraction, Fraction, list[int]]]:
+    """半拍以下のギャップを前の音の持続に吸収する(Issue #49: 休符断片の削減)。
+
+    採譜のオフセット検出は音の減衰で早く切れがちで、その切れ端が
+    細切れ休符(実測40-46%)の主因。半拍を超えるギャップは音楽的な休符
+    として保存する(音価の嘘をつかない)。
+    """
+    out: list[tuple[Fraction, Fraction, list[int]]] = []
+    for i, (start, dur, midis) in enumerate(groups):
+        if i + 1 < len(groups):
+            gap = groups[i + 1][0] - (start + dur)
+            if 0 < gap <= _GAP_FILL_MAX:
+                dur = groups[i + 1][0] - start
         out.append((start, dur, midis))
     return out
 
@@ -210,7 +232,9 @@ def _build_staff(
     if bpm is not None:
         part.insert(0, music21.tempo.MetronomeMark(number=float(bpm)))
 
-    for start, dur, midis in _cap_overlaps(_group_simultaneous(notes)):
+    for start, dur, midis in _fill_small_gaps(
+        _cap_overlaps(_group_simultaneous(notes))
+    ):
         if len(midis) == 1:
             el: music21.note.NotRest = music21.note.Note(spell_midi(midis[0], spell_key))
         else:
@@ -225,6 +249,30 @@ def _build_staff(
     _consolidate_rests(notated)
     _set_stems(notated, midline_midi)
     return notated
+
+
+def _drop_leading_silence(notes: Sequence[QuantizedNote]) -> list[QuantizedNote]:
+    """先頭の空小節ぶんだけ表示位置をシフトする(Issue #49: 弱起の巨大休符解消)。
+
+    完全小節単位でのみシフトし、小節内の弱起(アウフタクト)は休符として
+    保持する。実タイミング(onset_sec/offset_sec)は二重表現の原則(C3)に従い
+    変更しない — 動かすのは譜面上の位置だけ。
+    """
+    import dataclasses
+
+    if not notes:
+        return list(notes)
+    first = min(
+        Fraction(float(n.start_beats)).limit_denominator(12) for n in notes
+    )
+    lead_measures = int(first // BEATS_PER_MEASURE)
+    if lead_measures <= 0:
+        return list(notes)
+    shift = lead_measures * BEATS_PER_MEASURE
+    return [
+        dataclasses.replace(n, start_beats=float(n.start_beats) - float(shift))
+        for n in notes
+    ]
 
 
 def _measure_ceil(beats: Fraction) -> Fraction:
@@ -257,6 +305,7 @@ def to_score(
         score.insert(0, part.makeNotation(inPlace=False))
         return score
 
+    notes = _drop_leading_silence(notes)
     key = estimate_key(notes)
     treble, bass = split_hands(notes)
     ref_end = _measure_ceil(
