@@ -155,7 +155,7 @@ def main():
     print("saved results.json")
 
 
-_MODES = {"--score-rhythm", "--rhythm-configs"}
+_MODES = {"--score-rhythm", "--rhythm-configs", "--dual-timing"}
 if __name__ == "__main__" and not (_MODES & set(sys.argv)):
     main()
 
@@ -291,4 +291,73 @@ def main_rhythm_configs():
 
 if __name__ == "__main__" and "--rhythm-configs" in sys.argv:
     main_rhythm_configs()
+    sys.exit(0)
+
+
+def main_dual_timing():
+    """#38 C3二重表現の効果測定: 格子化ロスの解消を正解基準で確認する。
+
+    比較(いずれも rescue=高感度・#32の推奨構成):
+      bp   = 素点イベント(量子化なし)          … 上限参照
+      grid = 従来経路(量子化→格子MIDI)        … 格子化ロスを含む
+      raw  = 二重表現のraw側(実タイミングMIDI) … ロス解消の検証対象
+    指標: F1@100ms(正解MIDI基準)。raw が bp と同等なら格子化ロスは解消。
+    使い方: python bench_pd.py --dual-timing
+    """
+    sys.path.insert(0, str(ROOT / "tools" / "ai-ears"))
+    from score_metrics import score_rhythm_paths
+
+    from earpipe.services.notate import to_score, write_midi, write_midi_raw
+    from earpipe.services.rhythm import BPM_DEFAULT, estimate_tempo, quantize_events
+
+    rows = []
+    for rel, slug, cat in SONGS:
+        gt_path = CORPUS / f"{rel}.mid"
+        wav = OUT / f"{slug}.wav"
+        if not (gt_path.exists() and wav.exists()):
+            rows.append({"slug": slug, "cat": cat, "status": "cache missing"})
+            continue
+        try:
+            gt = midi_notes(gt_path)
+            events = [
+                e for e in detect_events_poly(wav, sensitivity="high") if e.onset < CLIP_SEC
+            ]
+            bpm = estimate_tempo(events) if events else BPM_DEFAULT
+            notes = quantize_events(events, bpm, mono=False)
+
+            bp_mid = OUT / f"{slug}_dual_bp.mid"
+            events_to_midi(events, bp_mid)
+            grid_mid = OUT / f"{slug}_dual_grid.mid"
+            write_midi(to_score(notes, bpm), grid_mid)
+            raw_mid = OUT / f"{slug}_dual_raw.mid"
+            write_midi_raw(notes, raw_mid, bpm=bpm)
+
+            row = {"slug": slug, "cat": cat, "gt_notes": len(gt), "status": "ok"}
+            for name, mid in (("bp", bp_mid), ("grid", grid_mid), ("raw", raw_mid)):
+                f1, p_, r_ = note_f1(gt, midi_notes(mid), 0.1)
+                row[f"{name}_f1"] = round(f1, 3)
+            # 格子側は楽譜レベルKPIも併記(同一出力から両指標が取れることの実証)
+            row["grid_sr"] = score_rhythm_paths(gt_path, grid_mid)["total"]
+            rows.append(row)
+            print(f"{slug}: f1 bp={row['bp_f1']} grid={row['grid_f1']} raw={row['raw_f1']}")
+        except Exception as e:
+            rows.append({"slug": slug, "cat": cat, "status": f"FAIL {type(e).__name__}: {e}"})
+            print(f"{slug}: FAIL {e}")
+
+    ok = [r for r in rows if r["status"] == "ok"]
+    if ok:
+        print(f"\n# dual-timing 集計 (n={len(ok)})")
+        print("| 表現 | F1@100ms平均 |")
+        print("|---|---|")
+        for name in ("bp", "grid", "raw"):
+            print(f"| {name} | {sum(r[f'{name}_f1'] for r in ok) / len(ok):.3f} |")
+        print(f"| grid score_rhythm平均 | {sum(r['grid_sr'] for r in ok) / len(ok):.3f} |")
+    (OUT / "results_dual_timing.json").write_text(
+        json.dumps(rows, ensure_ascii=False, indent=1)
+    )
+    print("saved results_dual_timing.json")
+
+
+if __name__ == "__main__" and "--dual-timing" in sys.argv:
+    main_dual_timing()
     sys.exit(0)

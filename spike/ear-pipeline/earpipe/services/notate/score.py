@@ -70,3 +70,40 @@ def write_musicxml(score: music21.stream.Score, path: str | Path) -> None:
 
 def write_midi(score: music21.stream.Score, path: str | Path) -> None:
     score.write("midi", fp=str(Path(path)))
+
+
+def write_midi_raw(
+    notes: Sequence[QuantizedNote], path: str | Path, bpm: float = 120.0
+) -> None:
+    """実タイミング(秒)でMIDIを書く(C3二重表現のraw側・Issue #38)。
+
+    格子に吸着させず onset_sec/offset_sec をそのまま使うため、
+    正解音源とのタイミング比較(F1@100ms等)に格子化ロスが混入しない。
+    実秒を持たない旧型データ(NaN)は bpm による格子秒へフォールバックする。
+    """
+    import math
+
+    import pretty_midi
+
+    pm = pretty_midi.PrettyMIDI(initial_tempo=float(bpm))
+    inst = pretty_midi.Instrument(program=0)
+    spb = 60.0 / float(bpm)
+    for n in notes:
+        if math.isnan(n.onset_sec) or math.isnan(n.offset_sec):
+            start = float(n.start_beats) * spb
+            end = start + float(n.dur_beats) * spb
+        else:
+            start = float(n.onset_sec)
+            end = float(n.offset_sec)
+        if end <= start:
+            end = start + 0.05
+        inst.notes.append(
+            pretty_midi.Note(
+                velocity=int(round(64 + 63 * max(0.0, min(1.0, n.confidence)))),
+                pitch=int(n.midi),
+                start=start,
+                end=end,
+            )
+        )
+    pm.instruments.append(inst)
+    pm.write(str(Path(path)))

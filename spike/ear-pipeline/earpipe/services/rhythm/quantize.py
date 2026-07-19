@@ -130,6 +130,8 @@ def quantize_events(
                 dur_beats=dur_q / GRID_PER_BEAT,
                 midi=e.midi,
                 confidence=e.confidence,
+                onset_sec=e.onset,
+                offset_sec=e.offset,
             )
         )
 
@@ -150,5 +152,10 @@ def quantize_events(
             if gap > 0:
                 dur = min(dur, gap)
         dur = max(dur, 1.0 / GRID_PER_BEAT)
-        clipped.append(QuantizedNote(n.start_beats, dur, n.midi, n.confidence))
+        # 切り詰めは格子側のみ。実タイミング(onset_sec/offset_sec)は保持する(C3)
+        clipped.append(
+            QuantizedNote(
+                n.start_beats, dur, n.midi, n.confidence, n.onset_sec, n.offset_sec
+            )
+        )
     return clipped

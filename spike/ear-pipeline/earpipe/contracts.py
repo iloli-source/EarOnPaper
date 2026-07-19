@@ -18,12 +18,22 @@ class PitchEvent:
 
 @dataclass(frozen=True)
 class QuantizedNote:
-    """拍格子に量子化された音符。start/dur は四分音符=1.0 の拍単位。"""
+    """量子化済み音符の二重表現(C3・Issue #38)。
+
+    - 格子側: start_beats/dur_beats(四分音符=1.0 の拍単位)。譜面表示・MusicXML用
+    - 実側: onset_sec/offset_sec(元イベントの実タイミング秒)。評価・rawエクスポート用
+
+    背景: PD15曲実測で格子スナップが音符を正解タイミングから引き剥がすことを確認
+    (results-pd.md)。格子は「楽譜にするため」の表現であり、データとしての
+    実タイミングを破壊してはならない。旧4引数構築との互換のため実側は既定NaN。
+    """
 
     start_beats: float
     dur_beats: float
     midi: int
     confidence: float
+    onset_sec: float = float("nan")
+    offset_sec: float = float("nan")
 
 
 @dataclass(frozen=True)

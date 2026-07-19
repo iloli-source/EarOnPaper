@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 from earpipe.services.ear import apply_postfilter, detect_events, detect_events_poly, select_events
-from earpipe.services.notate import to_score, write_midi, write_musicxml
+from earpipe.services.notate import to_score, write_midi, write_midi_raw, write_musicxml
 from earpipe.services.rhythm import BPM_DEFAULT, estimate_tempo, quantize_events
 from earpipe.services.stem import analyze_field, denoise, load_audio
 
@@ -24,6 +24,7 @@ def transcribe_file(
     sensitivity: str = "normal",
     postfilter: bool = False,
     field_mode: bool = False,
+    timing: str = "grid",
 ) -> dict:
     """音声ファイルを採譜する。engine: mono(pYIN単音) / poly(basic-pitch多声)。
 
@@ -61,9 +62,13 @@ def transcribe_file(
 
     score = to_score(notes, bpm)
     if out_musicxml:
-        write_musicxml(score, out_musicxml)
+        write_musicxml(score, out_musicxml)  # 譜面は常に格子側(楽譜=量子化表現)
     if out_midi:
-        write_midi(score, out_midi)
+        # C3二重表現(Issue #38): MIDIエクスポートは grid(格子) / raw(実タイミング) を選択可能
+        if timing == "raw":
+            write_midi_raw(notes, out_midi, bpm=bpm)
+        else:
+            write_midi(score, out_midi)
 
     result = {
         "input": str(in_path),
@@ -71,6 +76,7 @@ def transcribe_file(
         "n_events": len(events),
         "n_notes": len(notes),
         "bpm": bpm,
+        "timing": timing,
         "notes": notes,
     }
     if analysis is not None:
@@ -101,6 +107,10 @@ def main(argv: list[str] | None = None) -> int:
         "--postfilter", action="store_true",
         help="幽霊除去の後処理(#31)を有効化(既定OFF: PD実測で平均逆効果のため。詳細はIssue #31)",
     )
+    pt.add_argument(
+        "--timing", choices=("grid", "raw"), default="grid",
+        help="MIDIエクスポートのタイミング表現(C3二重表現)。grid=格子(既定・楽譜整合) / raw=実タイミング(評価・DAW向け)",
+    )
     args = p.parse_args(argv)
 
     out = args.output or str(Path(args.input).with_suffix(".musicxml"))
@@ -112,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         sensitivity=args.sensitivity,
         postfilter=args.postfilter,
         field_mode=args.field_mode,
+        timing=args.timing,
     )
     summary = {k: v for k, v in result.items() if k != "notes"}
     summary["output"] = out
