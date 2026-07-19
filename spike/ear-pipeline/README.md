@@ -63,3 +63,21 @@
 
 - `--sensitivity high`: 低閾値検出(#32)。PD15曲の楽譜レベルKPIで唯一BP素点超え(0.402 vs 0.387)。高速・高密度曲で劇的改善(トルコ行進曲F1 2.9倍)。疎な曲では逆効果=密度適応が将来課題
 - `--postfilter`: 幽霊除去(#31)。**既定OFF** — 実曲で本物のオクターブ重ねを誤除去し平均逆効果と実測されたため(bench/results-pd.md参照)。合成ケースでは設計どおり動作(テストで保証)
+
+## 構成（ADR-001 サービス分割・#35）
+
+```
+earpipe/
+├── contracts.py          # 契約IF: PitchEvent / QuantizedNote(frozen dataclass)
+├── pipeline.py           # オーケストレータ + CLI(transcribe)
+├── services/
+│   ├── stem/             # 前処理(ロード。将来: ステム分離F-003・音質診断F-002)
+│   ├── ear/              # 耳: mono(pYIN)・poly(Basic Pitch TFLite)・postfilter
+│   ├── rhythm/           # テンポ推定・量子化
+│   ├── notate/           # 五線譜MusicXML/MIDI出力
+│   └── quality/          # AIの耳(tools/ai-ears)への薄いクライアント(本体非依存)
+└── ear.py 等             # 後方互換シム(旧importパス維持)
+```
+
+依存方向は一方向(stem → ear → rhythm → notate)。qualityはエンジン本体に依存しない。
+静的検査: `tests/test_services_contract.py` がimportのAST走査で強制する。

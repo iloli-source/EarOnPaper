@@ -8,13 +8,11 @@ import argparse
 import json
 from pathlib import Path
 
-import librosa
 
-from earpipe.ear import detect_events
-from earpipe.ear_poly import detect_events_poly
-from earpipe.notate import to_score, write_midi, write_musicxml
-from earpipe.postfilter import apply_postfilter
-from earpipe.quantize import BPM_DEFAULT, estimate_tempo, quantize_events
+from earpipe.services.ear import apply_postfilter, detect_events, detect_events_poly
+from earpipe.services.notate import to_score, write_midi, write_musicxml
+from earpipe.services.rhythm import BPM_DEFAULT, estimate_tempo, quantize_events
+from earpipe.services.stem import load_audio
 
 
 def transcribe_file(
@@ -39,7 +37,7 @@ def transcribe_file(
         if postfilter:
             events = apply_postfilter(events)
     else:
-        y, sr = librosa.load(str(in_path), sr=None, mono=True)
+        y, sr = load_audio(in_path)
         events = detect_events(y, sr)
 
     if events:
