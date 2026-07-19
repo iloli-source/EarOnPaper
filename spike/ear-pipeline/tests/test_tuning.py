@@ -157,3 +157,23 @@ def test_correct_tuning_file_roundtrip(tmp_path):
     same_path, offset0 = correct_tuning_file(clean_path)
     assert same_path == clean_path, "閾値未満なら入力pathを返すべき"
     assert abs(offset0) < CORRECTION_THRESHOLD_CENTS
+
+
+def test_transcribe_preserves_input_file(tmp_path):
+    """回帰(#55修正バグ): transcribe_file は入力ファイルを絶対に削除しない。
+
+    str/Path混在の比較誤りで「無補正パススルー時に入力本体を一時ファイルと
+    誤認して削除する」バグが全スイートで実測された(FileNotFound連鎖)。
+    strパス・Pathパスの両方で入力が残ることを固定する。
+    """
+    import soundfile as sf
+
+    from earpipe.pipeline import transcribe_file
+
+    wav = tmp_path / "keep_me.wav"
+    sf.write(str(wav), _render(MELODY_A, 120, 0.0), SR)
+
+    transcribe_file(str(wav))  # strで渡す(バグの再現条件)
+    assert wav.exists(), "strパス入力が削除された"
+    transcribe_file(wav)  # Pathで渡す
+    assert wav.exists(), "Pathパス入力が削除された"

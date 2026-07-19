@@ -59,9 +59,12 @@ def transcribe_file(
     """
     # C1基準ピッチ補正(#55): A=440から8cents以上ずれていれば補正済み一時wavに差し替える
     # (in-tune入力は無補正パススルー)。一時ファイルは本関数終了時に削除する。
+    # 削除対象は「補正で新規作成された一時ファイル」のみ。str/Path混在でも
+    # 入力ファイル本体を誤って消さないよう、実体パスの一致で判定する(修正済みバグ)
     in_path_orig = in_path
-    in_path, tuning_offset = correct_tuning_file(in_path)
-    tuned_tmp = Path(in_path) if in_path != in_path_orig else None
+    corrected_path, tuning_offset = correct_tuning_file(in_path)
+    tuned_tmp = corrected_path if corrected_path != Path(in_path_orig) else None
+    in_path = corrected_path
 
     analysis = None
     y_loaded = None
