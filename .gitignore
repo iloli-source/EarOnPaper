@@ -4,3 +4,4 @@ tools/ai-ears/.venv/
 tools/ai-ears/testdata/
 tools/ai-ears/__pycache__/
 tools/ai-ears/.venv312/
+tools/ai-ears/tests/__pycache__/
