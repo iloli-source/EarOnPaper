@@ -162,14 +162,17 @@ def tempo_consistency(y_orig: np.ndarray, pm) -> dict:
 # ---------------------------------------------------------------- 指標5: 音域一致(オクターブ検出)
 
 def register_match(y_orig: np.ndarray, notes) -> dict:
-    """元音源の基音音域と採譜の音域の一致(オクターブ誤り検出)。
+    """元音源の基音音域と採譜の音域の一致(オクターブ誤り検出)。指標v2.1。
 
-    chroma系はオクターブ不変のため、全音を1オクターブ間違えた採譜でも高得点になる
-    (審判攻撃 func-r1-fable-output P0)。その穴を塞ぐ補助指標。
-    元音源は pyin の有声フレーム中央値、採譜側は音価加重中央値で比較する。
-    多声・倍音による推定ノイズを許容するため±6半音は満点とし、
-    12半音(1オクターブ)ずれで0点になる線形ペナルティ。
-    部分的なオクターブ誤り(一部の音のみ)は中央値比較では薄まる — 既知の限界。
+    chroma系はオクターブ不変のため、オクターブを間違えた採譜でも高得点になる。
+    v2(音価加重中央値の比較)は全音+12は検出できたが、部分オクターブ誤り
+    (40%上げ/交互/長anchor挿入)は中央値が動かず素通しした(func-r2-output P0)。
+    v2.1はノート単位のオクターブ整合分布で検出する:
+      各音符の時間窓内の元音源f0のうち、音名(chroma)が一致するフレームとの
+      オクターブ差 k を求め、k≠0 の音符の比率(外れ率)でペナルティを課す。
+      音名一致フィルタにより多声の和声音は評価対象外となり誤罰を避ける。
+      実音楽のオクターブ重ね(15%まで)は許容フロアとして正常扱い。
+    大域中央値の比較も維持し、スコアは min(大域, 分布) の保守側を採る。
     """
     import librosa
 
@@ -178,27 +181,66 @@ def register_match(y_orig: np.ndarray, notes) -> dict:
     f0, voiced_flag, _ = librosa.pyin(
         y_orig, fmin=27.5, fmax=4186.0, sr=SR, frame_length=2048
     )
-    voiced = f0[voiced_flag & np.isfinite(f0)] if f0 is not None else np.array([])
+    if f0 is None:
+        return {"score": None, "explanation": "元音源の基音が推定できないため評価不能(総合から除外)。"}
+    times = librosa.times_like(f0, sr=SR)
+    voiced_mask = voiced_flag & np.isfinite(f0)
+    voiced = f0[voiced_mask]
     if voiced.size < 10:
         return {"score": None, "explanation": "元音源の基音が推定できないため評価不能(総合から除外)。"}
+    f0_midi = librosa.hz_to_midi(f0)
     orig_midi = float(np.median(librosa.hz_to_midi(voiced)))
 
+    # --- 大域(v2互換): 音価加重中央値のずれ
     durations = np.array([max(n.end - n.start, 1e-3) for n in notes])
     pitches = np.array([n.pitch for n in notes], dtype=float)
     order = np.argsort(pitches)
     cum = np.cumsum(durations[order])
     est_midi = float(pitches[order][np.searchsorted(cum, cum[-1] / 2.0)])
-
     offset = est_midi - orig_midi
     dead, full = 6.0, 12.0
-    score = float(np.clip(1.0 - max(0.0, abs(offset) - dead) / (full - dead), 0.0, 1.0))
+    score_global = float(np.clip(1.0 - max(0.0, abs(offset) - dead) / (full - dead), 0.0, 1.0))
+
+    # --- 分布(v2.1): ノート単位のオクターブ整合
+    CHROMA_TOL = 1.5   # 音名一致とみなす円距離(半音)
+    MIN_FRAMES = 3     # 評価に必要な一致フレーム数
+    FLOOR, SLOPE = 0.15, 0.35  # 外れ率15%まで正常(オクターブ重ね許容)、50%で0点
+    outliers = 0
+    evaluable = 0
+    for n in notes:
+        sel = voiced_mask & (times >= n.start) & (times <= n.end)
+        if not np.any(sel):
+            continue
+        fm = f0_midi[sel]
+        diff = np.asarray(n.pitch, dtype=float) - fm
+        circ = np.abs((diff + 6.0) % 12.0 - 6.0)  # 音名(mod12)の円距離
+        match = fm[circ <= CHROMA_TOL]
+        if match.size < MIN_FRAMES:
+            continue
+        k = int(np.round(float(np.median(np.asarray(n.pitch, dtype=float) - match)) / 12.0))
+        evaluable += 1
+        if k != 0:
+            outliers += 1
+    if evaluable >= 5:
+        outlier_ratio = outliers / evaluable
+        score_partial = float(np.clip(1.0 - max(0.0, outlier_ratio - FLOOR) / SLOPE, 0.0, 1.0))
+        score = min(score_global, score_partial)
+        ratio_out = round(outlier_ratio, 3)
+    else:
+        # 評価可能ノートが少なすぎる場合は大域のみ(限界を明示)
+        score = score_global
+        ratio_out = None
+
     return {
         "score": round(score, 4),
         "offset_semitones": round(offset, 1),
+        "octave_outlier_ratio": ratio_out,
+        "evaluable_notes": evaluable,
         "explanation": (
             "音の高さの『絶対的な高さ(オクターブ)』が元音源と合っているか。"
             "音名一致(chroma)はオクターブ違いを見抜けないため、この指標で補完する。"
-            "±6半音以内=満点、12半音(1オクターブ)ずれ=0点。"
+            "v2.1: 全体のずれに加え、音符単位のオクターブ外れ率(部分的な誤り)も検出する。"
+            "外れ率15%までは実音楽のオクターブ重ねとして許容。"
         ),
     }
 
@@ -255,6 +297,8 @@ def score_health(pm, notes) -> dict:
 # ---------------------------------------------------------------- 総合
 
 # 指標v2 (2026-07-19, Issue #48): register(オクターブ検出)を追加し重みを再配分。
+# 指標v2.1 (2026-07-19, Issue #52): registerをノート単位オクターブ整合分布に是正し、
+#   致命的欠陥フラグ(register/health≤0.3)でverdictの誤標識(高一致)を解消。
 # v1: {chroma 0.4, onset 0.3, tempo 0.1, health 0.2}
 # 較正変更のため、v1の数字との直接比較は不可(README「指標バージョン」参照)。
 # 較正メモ: health/registerは「欠陥の不在」を測る指標で類似度を測らないため
@@ -274,13 +318,27 @@ def overall(results: dict) -> dict:
     wsum = sum(usable.values())
     total = sum(results[k]["score"] * w for k, w in usable.items()) / wsum
     excluded = [k for k in weights if k not in usable]
-    if total >= 0.80:
+    # 致命的欠陥フラグ: 個別指標が重大水準で発火している場合、総合点が高くても
+    # 「高一致」と標識しない(v2.1: 部分オクターブ誤りの誤標識解消 func-r2-output P1)。
+    critical = []
+    reg = results.get("register", {})
+    if reg.get("score") is not None and reg["score"] <= 0.3:
+        critical.append("オクターブ不整合")
+    hl = results.get("health", {})
+    if hl.get("score") is not None and hl["score"] <= 0.3:
+        critical.append("譜面健全性")
+    if total >= 0.80 and not critical:
         verdict = "高一致 — 手直しは軽い可能性(人の耳での確認を推奨)"
+    elif critical and total >= 0.60:
+        # 総合が中〜高なのに致命的欠陥指標が発火 → 高めのスコアで欠陥を隠さない
+        verdict = (f"要確認({'・'.join(critical)}) — 総合{total:.2f}だが致命的欠陥指標が発火。"
+                   "通常の一致判定は保留")
     elif total >= 0.60:
         verdict = "部分一致 — それなりの手直しが必要な水準"
     else:
         verdict = "低一致 — 大幅な手直しか作り直しが必要な水準"
     return {"score": round(float(total), 4), "verdict": verdict,
+            "critical_flags": critical,
             "weights": weights, "excluded_metrics": excluded}
 
 

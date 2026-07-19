@@ -140,3 +140,92 @@ class TestScoreRhythmWeight:
     def test_backward_compat_without_reference(self, baseline_result):
         assert "score_rhythm" not in baseline_result, "正解なし運用は従来どおり(後方互換)"
         assert abs(sum(baseline_result["overall"]["weights"].values()) - 1.0) < 1e-6
+
+
+def _shift_octave_partial(pm, fraction: float, seed: int = 13):
+    """一部の音だけ+12する部分オクターブ攻撃(R2: func-r2-output P0)。"""
+    pm2 = copy.deepcopy(pm)
+    rng = random.Random(seed)
+    for inst in pm2.instruments:
+        for n in inst.notes:
+            if rng.random() < fraction:
+                n.pitch = int(np.clip(n.pitch + 12, 0, 127))
+    return pm2
+
+
+def _shift_octave_alternating(pm):
+    """交互に+12(中央値を動かさない攻撃)。"""
+    pm2 = copy.deepcopy(pm)
+    for inst in pm2.instruments:
+        for i, n in enumerate(inst.notes):
+            if i % 2 == 0:
+                n.pitch = int(np.clip(n.pitch + 12, 0, 127))
+    return pm2
+
+
+def _anchor_cheat(pm):
+    """全音+12にした上で、長い正レジスタのanchor音を1本足して中央値を引き戻す攻撃。"""
+    pm2 = _shift_octave(pm, +12)
+    inst = pm2.instruments[0]
+    src = inst.notes[0]
+    import pretty_midi
+    total = max(n.end for n in inst.notes)
+    anchor = pretty_midi.Note(velocity=80, pitch=int(src.pitch - 12),
+                              start=0.0, end=float(total))
+    inst.notes.append(anchor)
+    return pm2
+
+
+class TestPartialOctaveAttack:
+    """R2攻撃: 部分オクターブ誤り(func-r2-output P0)。
+
+    音価加重中央値の register は 40%上げ/交互/長anchor をすべて素通しした。
+    v2.1: ノート単位のオクターブ整合分布で検出することを仕様として固定する。
+    """
+
+    @pytest.fixture(scope="class")
+    def partial40_result(self, workdir, reference_pm, reference_audio):
+        pm = _shift_octave_partial(reference_pm, 0.4)
+        path = workdir / "attack_partial40.mid"
+        pm.write(str(path))
+        return ears.cmd_compare(CompareArgs(reference_audio, path))
+
+    @pytest.fixture(scope="class")
+    def alternating_result(self, workdir, reference_pm, reference_audio):
+        pm = _shift_octave_alternating(reference_pm)
+        path = workdir / "attack_alternating.mid"
+        pm.write(str(path))
+        return ears.cmd_compare(CompareArgs(reference_audio, path))
+
+    @pytest.fixture(scope="class")
+    def anchor_result(self, workdir, reference_pm, reference_audio):
+        pm = _anchor_cheat(reference_pm)
+        path = workdir / "attack_anchor.mid"
+        pm.write(str(path))
+        return ears.cmd_compare(CompareArgs(reference_audio, path))
+
+    def test_partial40_register_detects(self, partial40_result):
+        assert partial40_result["register"]["score"] is not None
+        assert partial40_result["register"]["score"] <= 0.5, (
+            "40%オクターブ上げが register で検出されるべき(旧実装は1.0素通し)")
+
+    def test_alternating_register_detects(self, alternating_result):
+        assert alternating_result["register"]["score"] <= 0.3, (
+            "50%交互オクターブ上げが register で検出されるべき")
+
+    def test_anchor_cheat_detects(self, anchor_result):
+        assert anchor_result["register"]["score"] <= 0.3, (
+            "長anchor挿入で中央値を引き戻す騙しが検出されるべき")
+
+    def test_outlier_ratio_reported(self, partial40_result):
+        assert "octave_outlier_ratio" in partial40_result["register"], (
+            "ノート単位のオクターブ外れ率が報告されるべき")
+
+    def test_partial_attack_verdict_not_high(self, alternating_result):
+        assert "高一致" not in alternating_result["overall"]["verdict"], (
+            "オクターブ不整合が発火しているのに『高一致』と標識してはならない(誤標識の解消)")
+
+    def test_baseline_outlier_low(self, baseline_result):
+        ratio = baseline_result["register"].get("octave_outlier_ratio")
+        assert ratio is not None and ratio <= 0.15, (
+            "同一MIDIのオクターブ外れ率はほぼゼロであるべき(偽陽性防止)")
