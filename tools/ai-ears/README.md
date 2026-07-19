@@ -55,3 +55,13 @@ python3 -m venv .venv
 
 - **正解MIDIがある場合**（PDベンチ・合成データ・G1台帳曲）: `score_metrics.score_rhythm`（楽譜レベルKPI）と正解Note F1が**正**。
 - **正解がない場合**（実録音のスクリーニング・G0'比較）: ears.py の出だし指標を参考値として使う。ただし格子吸着を過大評価する既知の癖があるため、量子化の有無をまたぐ比較には使わない（rhythm-autopsy §5.1）。
+
+## 指標バージョン
+
+- **v2 (2026-07-19, Issue #48)**: 審判攻撃監査(func-r1-fable-output P0×3)への対応。
+  - `register`(音域一致)を追加 — chroma系のオクターブ不変の穴を補完。全音+12の採譜: 旧≈0.90「高一致」→ **v2 0.762**(register 0.0)
+  - `health`の密度ペナルティを連続化(旧: 25音/秒のハード崖) — 20音/秒に整えた幽霊大群: 旧health 1.0素通り→ **v2 0.680**
+  - 正解MIDIあり運用(`--reference`)で `score_rhythm` を総合に組込(重み0.35)
+  - 重み v2: chroma .35 / onset .35 / tempo .05 / health .125 / register .125(正解ありは別表)。
+    **v1の数字(過去のベンチ・台帳)との直接比較は不可**。同一MIDI基準: v1 0.9029 → v2 0.8881
+- v1 (2026-07-19 初版): chroma .4 / onset .3 / tempo .1 / health .2

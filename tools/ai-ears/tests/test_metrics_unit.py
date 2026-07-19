@@ -189,12 +189,16 @@ class TestScoreHealth:
 
 @pytest.mark.unit
 class TestOverallAndReport:
-    def _results(self, chroma, onset, tempo, health):
+    def _results(self, chroma, onset, tempo, health, register=None):
+        # 指標v2(Issue #48): register追加。未指定時はhealthと同値(欠陥なし想定)。
+        if register is None:
+            register = health
         return {
             "chroma": {"score": chroma, "explanation": ""},
             "onset": {"score": onset, "explanation": ""},
             "tempo": {"score": tempo, "explanation": ""},
             "health": {"score": health, "explanation": "", "issues": []},
+            "register": {"score": register, "explanation": ""},
         }
 
     def test_weighted_average(self):

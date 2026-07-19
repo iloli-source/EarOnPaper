@@ -20,10 +20,11 @@ import synth_test  # noqa: E402
 class CompareArgs:
     """ears.cmd_compare に渡す最小の引数オブジェクト。"""
 
-    def __init__(self, original, transcription, report=None):
+    def __init__(self, original, transcription, report=None, reference=None):
         self.original = str(original)
         self.transcription = str(transcription)
         self.report = str(report) if report else None
+        self.reference = str(reference) if reference else None
 
 
 @pytest.fixture(scope="session")

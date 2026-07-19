@@ -159,6 +159,50 @@ def tempo_consistency(y_orig: np.ndarray, pm) -> dict:
     }
 
 
+# ---------------------------------------------------------------- 指標5: 音域一致(オクターブ検出)
+
+def register_match(y_orig: np.ndarray, notes) -> dict:
+    """元音源の基音音域と採譜の音域の一致(オクターブ誤り検出)。
+
+    chroma系はオクターブ不変のため、全音を1オクターブ間違えた採譜でも高得点になる
+    (審判攻撃 func-r1-fable-output P0)。その穴を塞ぐ補助指標。
+    元音源は pyin の有声フレーム中央値、採譜側は音価加重中央値で比較する。
+    多声・倍音による推定ノイズを許容するため±6半音は満点とし、
+    12半音(1オクターブ)ずれで0点になる線形ペナルティ。
+    部分的なオクターブ誤り(一部の音のみ)は中央値比較では薄まる — 既知の限界。
+    """
+    import librosa
+
+    if not notes:
+        return {"score": None, "explanation": "採譜に音符がないため評価不能(総合から除外)。"}
+    f0, voiced_flag, _ = librosa.pyin(
+        y_orig, fmin=27.5, fmax=4186.0, sr=SR, frame_length=2048
+    )
+    voiced = f0[voiced_flag & np.isfinite(f0)] if f0 is not None else np.array([])
+    if voiced.size < 10:
+        return {"score": None, "explanation": "元音源の基音が推定できないため評価不能(総合から除外)。"}
+    orig_midi = float(np.median(librosa.hz_to_midi(voiced)))
+
+    durations = np.array([max(n.end - n.start, 1e-3) for n in notes])
+    pitches = np.array([n.pitch for n in notes], dtype=float)
+    order = np.argsort(pitches)
+    cum = np.cumsum(durations[order])
+    est_midi = float(pitches[order][np.searchsorted(cum, cum[-1] / 2.0)])
+
+    offset = est_midi - orig_midi
+    dead, full = 6.0, 12.0
+    score = float(np.clip(1.0 - max(0.0, abs(offset) - dead) / (full - dead), 0.0, 1.0))
+    return {
+        "score": round(score, 4),
+        "offset_semitones": round(offset, 1),
+        "explanation": (
+            "音の高さの『絶対的な高さ(オクターブ)』が元音源と合っているか。"
+            "音名一致(chroma)はオクターブ違いを見抜けないため、この指標で補完する。"
+            "±6半音以内=満点、12半音(1オクターブ)ずれ=0点。"
+        ),
+    }
+
+
 # ---------------------------------------------------------------- 指標4: 譜面健全性(音源不要)
 
 def score_health(pm, notes) -> dict:
@@ -182,16 +226,16 @@ def score_health(pm, notes) -> dict:
     if out_of_range > 0:
         issues.append(f"楽器の音域外の音符が{out_of_range:.0%}")
 
-    # 3) 同時発音の異常な密度(1秒窓での平均同時ノート数)
+    # 3) 音符密度(1秒あたりの音符数)。ハード閾値の崖は攻撃可能
+    #    (旧25個/秒の崖: 20個/秒に整えた幽霊大群が素通りした — func-r1-fable-output P0)。
+    #    12個/秒から連続的にペナルティを増やす(高速な実音楽でも概ね10個/秒未満)。
     density_penalty = 0.0
     if len(notes) > 1:
         total = max(ends.max() - starts.min(), 1e-6)
         density = len(notes) / total
-        if density > 25:
+        density_penalty = float(np.clip((density - 12.0) / 25.0, 0.0, 0.6))
+        if density_penalty > 0.05:
             issues.append(f"音符密度が異常({density:.0f}個/秒) — 幽霊音符の疑い")
-            # 指摘だけでなく減点にも反映する(テストで発見したバグの修正 2026-07-19:
-            # 旧実装は密度を指摘に載せるのみでスコアに反映せず、密なゴミ出力が高得点になり得た)
-            density_penalty = min(0.6, 0.4 + (density - 25) / 100)
     # 4) 長い無音への音符配置は compare 側でしか判定できないため対象外(README参照)
 
     penalty = min(1.0, too_short * 2 + out_of_range * 3 + density_penalty
@@ -210,14 +254,26 @@ def score_health(pm, notes) -> dict:
 
 # ---------------------------------------------------------------- 総合
 
-WEIGHTS = {"chroma": 0.4, "onset": 0.3, "tempo": 0.1, "health": 0.2}
+# 指標v2 (2026-07-19, Issue #48): register(オクターブ検出)を追加し重みを再配分。
+# v1: {chroma 0.4, onset 0.3, tempo 0.1, health 0.2}
+# 較正変更のため、v1の数字との直接比較は不可(README「指標バージョン」参照)。
+# 較正メモ: health/registerは「欠陥の不在」を測る指標で類似度を測らないため
+# (無関係な曲でも1.0になり得る)、判別力のあるchroma/onsetの重みを主に保つ。
+WEIGHTS = {"chroma": 0.35, "onset": 0.35, "tempo": 0.05, "health": 0.125, "register": 0.125}
+# 正解MIDIあり運用: 楽譜レベルのリズム指標 score_rhythm を総合に組み込む(重み最大)。
+WEIGHTS_WITH_REF = {
+    "chroma": 0.2, "onset": 0.2, "tempo": 0.05,
+    "health": 0.1, "register": 0.1, "score_rhythm": 0.35,
+}
 
 
 def overall(results: dict) -> dict:
-    usable = {k: w for k, w in WEIGHTS.items() if results[k]["score"] is not None}
+    weights = WEIGHTS_WITH_REF if "score_rhythm" in results else WEIGHTS
+    usable = {k: w for k, w in weights.items()
+              if results.get(k, {}).get("score") is not None}
     wsum = sum(usable.values())
     total = sum(results[k]["score"] * w for k, w in usable.items()) / wsum
-    excluded = [k for k in WEIGHTS if k not in usable]
+    excluded = [k for k in weights if k not in usable]
     if total >= 0.80:
         verdict = "高一致 — 手直しは軽い可能性(人の耳での確認を推奨)"
     elif total >= 0.60:
@@ -225,7 +281,7 @@ def overall(results: dict) -> dict:
     else:
         verdict = "低一致 — 大幅な手直しか作り直しが必要な水準"
     return {"score": round(float(total), 4), "verdict": verdict,
-            "weights": WEIGHTS, "excluded_metrics": excluded}
+            "weights": weights, "excluded_metrics": excluded}
 
 
 # ---------------------------------------------------------------- レポート
@@ -242,7 +298,8 @@ def make_report(result: dict, original: str, transcription: str) -> str:
         "|---|---|---|",
     ]
     label = {"chroma": "音高一致度", "onset": "音の出だし一致",
-             "tempo": "テンポ整合", "health": "譜面健全性"}
+             "tempo": "テンポ整合", "health": "譜面健全性",
+             "register": "音域一致(オクターブ)", "score_rhythm": "楽譜レベルリズム(正解あり)"}
     for key, name in label.items():
         if key in result:
             r = result[key]
@@ -271,7 +328,22 @@ def cmd_compare(args):
         "onset": onset_match(y_orig, notes),
         "tempo": tempo_consistency(y_orig, pm),
         "health": score_health(pm, notes),
+        "register": register_match(y_orig, notes),
     }
+    reference = getattr(args, "reference", None)
+    if reference:
+        from score_metrics import score_rhythm
+
+        gt_pm, _ = load_midi(str(reference))
+        sr_result = score_rhythm(gt_pm, pm)
+        result["score_rhythm"] = {
+            "score": round(float(sr_result["total"]), 4),
+            **{k: v for k, v in sr_result.items() if k != "total"},
+            "explanation": (
+                "正解楽譜との拍単位の一致(楽譜レベルのリズム品質)。"
+                "正解MIDIがある運用でのみ算出され、総合スコアに最大重みで組み込まれる。"
+            ),
+        }
     result["overall"] = overall(result)
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -295,6 +367,7 @@ def main():
     pc = sub.add_parser("compare", help="元音源と採譜MIDIを比較")
     pc.add_argument("--original", required=True, help="元音源(wav/mp3等)")
     pc.add_argument("--transcription", required=True, help="採譜結果(MIDI)")
+    pc.add_argument("--reference", help="正解MIDI(あればscore_rhythmを総合に組み込む)")
     pc.add_argument("--report", help="Markdownレポートの出力先")
     pc.set_defaults(func=cmd_compare)
 
