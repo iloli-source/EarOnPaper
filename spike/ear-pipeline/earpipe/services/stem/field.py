@@ -15,28 +15,50 @@ from earpipe.contracts import FieldReport
 
 _FLATNESS_NOISE = 0.15   # これ超の平坦度は「ノイズ様」
 _PERC_DOMINANCE = 2.0    # 打撃エネルギーが調波の何倍なら「打撃様」か
-_SNR_CLEAN_DB = 8.0   # 推定器の実測スケール(クリーン系≈9で飽和)に較正済み
-_SNR_NOISY_DB = 6.0
+_SNR_CLEAN_DB = 20.0  # 実SNRスケール(dB)。#45で無音率検出器から作り直した際に再較正
+_SNR_NOISY_DB = 10.0
+_SNR_MAX_DB = 60.0    # 飽和上限(クリーン純音は数値床のため発散するのを防ぐ)
+_MEDIAN_TO_MEAN = float(np.log(2.0))  # 指数分布(ガウス雑音のパワースペクトル)の中央値→平均補正
 
 
 @dataclass(frozen=True)
 class FieldAnalysis:
     """analyze_field の結果: SNRと分類レポート。"""
 
-    snr_db: float           # 内部プロキシ値(絶対SNRではない。クリーン疎音源で≈9に飽和する実測特性)
+    snr_db: float           # 実SNR推定値(dB)。0〜60にクランプ。広帯域成分は雑音側に数える
     noise_profile: str
     report: FieldReport
 
 
-def _estimate_snr_db(rms: np.ndarray) -> float:
-    """フレームRMSの上位/下位百分位比からSNRを概算する。
+def _estimate_snr_db(S: np.ndarray) -> float:
+    """スペクトルの雑音床分離による実SNR推定(dB)。
 
-    静かなフレーム(下位10%)を雑音床、鳴っているフレーム(上位90%)を信号とみなす。
-    クリーンな演奏は音間の無音が床になるためSNRが大きく出る。
+    各フレームで周波数ビンのパワー中央値を雑音床PSDとみなす
+    (音程成分は少数ビンに集中し中央値に影響しない。広帯域雑音は全ビンに広がる)。
+    ガウス雑音のビンパワーは指数分布のため中央値をln2で平均に補正し、
+    雑音総パワー = 補正中央値 × ビン数、信号 = 総パワー − 雑音、として
+    アクティブフレーム合算のSNRを返す。0〜_SNR_MAX_DBにクランプ。
+
+    限界(正直な記録): ドラム等の広帯域「音楽」成分も雑音側に数える。
+    音程抽出の観点では妥当(音程の敵はすべて床)だが、絶対SNRとは意味が
+    ずれる場面がある。既知SNR混合での誤差は±6dB水準(テスト固定)。
     """
-    lo = float(np.percentile(rms, 10)) + 1e-10
-    hi = float(np.percentile(rms, 90)) + 1e-10
-    return float(20.0 * np.log10(hi / lo))
+    P = S.astype(np.float64) ** 2  # (bins, frames) パワー
+    frame_total = P.sum(axis=0)
+    if frame_total.size == 0:
+        return 0.0
+    active = frame_total > max(float(frame_total.max()) * 1e-6, 1e-18)
+    if not bool(active.any()):
+        return 0.0
+    Pa = P[:, active]
+    n_bins = Pa.shape[0]
+    noise_per_frame = np.median(Pa, axis=0) / _MEDIAN_TO_MEAN * n_bins
+    total_per_frame = Pa.sum(axis=0)
+    signal_per_frame = np.maximum(total_per_frame - noise_per_frame, 0.0)
+    noise = float(noise_per_frame.sum()) + 1e-30
+    signal = float(signal_per_frame.sum())
+    snr = 10.0 * np.log10(signal / noise + 1e-30)
+    return float(np.clip(snr, 0.0, _SNR_MAX_DB))
 
 
 def _to_mono(y: np.ndarray) -> np.ndarray:
@@ -56,13 +78,15 @@ def analyze_field(y: np.ndarray, sr: int) -> FieldAnalysis:
     22.05k/44.1k両系で動作確認済み(時間分解能のみ変わる)。
     """
     y = _to_mono(np.asarray(y, dtype=np.float64))
+    # 境界検証: 破損WAV等由来の非有限値でlibrosaが即死しないよう無音化する(#45 S3/S4)
+    if not np.all(np.isfinite(y)):
+        y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
     if len(y) == 0 or float(np.max(np.abs(y))) < 1e-9:
         report = FieldReport(0.0, "very_noisy", 0.0, 0.0, 0.0)
         return FieldAnalysis(0.0, "very_noisy", report)
 
     S = np.abs(librosa.stft(y, n_fft=2048, hop_length=512))
-    rms = librosa.feature.rms(S=S)[0]
-    snr_db = _estimate_snr_db(rms)
+    snr_db = _estimate_snr_db(S)
 
     H, P = librosa.decompose.hpss(S)
     flatness = librosa.feature.spectral_flatness(S=S)[0]
@@ -101,6 +125,8 @@ def denoise(y: np.ndarray, sr: int) -> np.ndarray:
     1フレーム未満(2048サンプル)の入力は降噪せずそのまま返す。
     """
     y = _to_mono(np.asarray(y, dtype=np.float64))
+    if not np.all(np.isfinite(y)):
+        y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
     if len(y) < 2048:
         return y
     S = librosa.stft(y, n_fft=2048, hop_length=512)

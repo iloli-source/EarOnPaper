@@ -7,10 +7,12 @@
 
 from earpipe.contracts import PitchEvent
 
-# 閾値はfield.pyの内部SNRプロキシ値基準(絶対dBではない。クリーン系≈9で飽和する実測スケール)
-_CONF_CLEAN = 0.50       # プロキシ>=8.0(clean): 既定と同じ
-_CONF_NOISY = 0.55       # 6.0-8.0(noisy)
-_CONF_VERY_NOISY = 0.58  # <6.0(very_noisy)
+# 閾値はfield.pyの実SNRスケール(dB)と同期(#45で無音率検出器から作り直し20/10dBに再較正)
+_SNR_CLEAN_DB = 20.0     # field.py._SNR_CLEAN_DB と同値(サービス境界のため定数重複。変更時は両方)
+_SNR_NOISY_DB = 10.0     # field.py._SNR_NOISY_DB と同値
+_CONF_CLEAN = 0.50       # >=20dB(clean): 既定と同じ
+_CONF_NOISY = 0.55       # 10-20dB(noisy)
+_CONF_VERY_NOISY = 0.58  # <10dB(very_noisy)
 _MIN_DUR_NOISY = 0.10    # 雑音下では極短イベントも捨てる(秒)
 
 
@@ -21,9 +23,9 @@ def select_events(events: list[PitchEvent], snr_db: float) -> list[PitchEvent]:
     過度の絞りは良品を殺すだけと判明(pink SNR10でF1 0.968→0.316の実測)。
     軽い絞り+極短除去に留める。
     """
-    if snr_db >= 8.0:
+    if snr_db >= _SNR_CLEAN_DB:
         min_conf, min_dur = _CONF_CLEAN, 0.0
-    elif snr_db >= 6.0:
+    elif snr_db >= _SNR_NOISY_DB:
         min_conf, min_dur = _CONF_NOISY, _MIN_DUR_NOISY
     else:
         min_conf, min_dur = _CONF_VERY_NOISY, _MIN_DUR_NOISY
