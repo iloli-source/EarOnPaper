@@ -22,8 +22,11 @@ SENSITIVITY = {
     "high": (0.3, 0.18, 0.08),
 }
 _WORKER = Path(__file__).with_name("bp_worker.py")
-_DEFAULT_BP_PYTHON = (
-    Path(__file__).resolve().parents[5] / "tools" / "ai-ears" / ".venv312" / "bin" / "python"
+# basic-pitch用インタプリタの探索候補（上から優先。リポジトリレイアウト差を吸収）
+_BP_PYTHON_CANDIDATES = (
+    Path(__file__).resolve().parents[5] / "tools" / "ai-ears" / ".venv312" / "bin" / "python",
+    Path(__file__).resolve().parents[4] / ".venv-bp" / "bin" / "python",  # OSSレイアウト: engine/.venv-bp
+    Path(__file__).resolve().parents[5] / ".venv-bp" / "bin" / "python",  # OSSレイアウト: リポジトリ直下
 )
 
 
@@ -32,8 +35,9 @@ def bp_python_path() -> str | None:
     env = os.environ.get("EARPIPE_BP_PYTHON")
     if env:
         return env if Path(env).exists() else None
-    if _DEFAULT_BP_PYTHON.exists():
-        return str(_DEFAULT_BP_PYTHON)
+    for cand in _BP_PYTHON_CANDIDATES:
+        if cand.exists():
+            return str(cand)
     return None
 
 
