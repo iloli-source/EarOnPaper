@@ -155,7 +155,7 @@ def main():
     print("saved results.json")
 
 
-_MODES = {"--score-rhythm", "--rhythm-configs", "--dual-timing"}
+_MODES = {"--score-rhythm", "--rhythm-configs", "--dual-timing", "--adaptive"}
 if __name__ == "__main__" and not (_MODES & set(sys.argv)):
     main()
 
@@ -372,4 +372,99 @@ def main_dual_timing():
 
 if __name__ == "__main__" and "--dual-timing" in sys.argv:
     main_dual_timing()
+    sys.exit(0)
+
+
+def main_adaptive():
+    """#54 密度適応の受入測定: C1-1/C1-2/C3-4 を一括で判定する。
+
+    比較(正解MIDI基準):
+      bp       = normal素点イベント(量子化なし) … C1-1の分母(基準0.709)
+      adaptive = 密度適応(auto)で選択したイベント列
+        raw側  = 実タイミングMIDI … C1-1判定(平均F1@100msが bp 以上)
+        grid側 = 格子MIDI        … C3回帰(score_rhythm) + C3-4(疎曲劣化≤0.05)
+    C1-2: マッチ手順は note_f1(音高一致+開始±tol・貪欲1対1)で固定し±50ms列を併記。
+    使い方: python bench_pd.py --adaptive
+    """
+    sys.path.insert(0, str(ROOT / "tools" / "ai-ears"))
+    from score_metrics import score_rhythm_paths
+
+    from earpipe.services.ear import detect_events_adaptive
+    from earpipe.services.notate import to_score, write_midi, write_midi_raw
+    from earpipe.services.rhythm import (
+        BPM_DEFAULT,
+        GRID_PER_BEAT,
+        estimate_grid,
+        quantize_events,
+    )
+
+    rows = []
+    for rel, slug, cat in SONGS:
+        gt_path = CORPUS / f"{rel}.mid"
+        wav = OUT / f"{slug}.wav"
+        if not (gt_path.exists() and wav.exists()):
+            rows.append({"slug": slug, "cat": cat, "status": "cache missing"})
+            continue
+        try:
+            gt = midi_notes(gt_path)
+            sel = detect_events_adaptive(wav)
+            events = [e for e in sel.events if e.onset < CLIP_SEC]
+            normal = [e for e in detect_events_poly(wav) if e.onset < CLIP_SEC]
+
+            bp_mid = OUT / f"{slug}_adp_bp.mid"
+            events_to_midi(normal, bp_mid)
+            bpm, gpb = estimate_grid(events) if events else (BPM_DEFAULT, GRID_PER_BEAT)
+            notes = quantize_events(events, bpm, mono=False, grid_per_beat=gpb)
+            raw_mid = OUT / f"{slug}_adp_raw.mid"
+            write_midi_raw(notes, raw_mid, bpm=bpm)
+            grid_mid = OUT / f"{slug}_adp_grid.mid"
+            write_midi(to_score(notes, bpm), grid_mid)
+
+            row = {
+                "slug": slug, "cat": cat, "gt_notes": len(gt), "status": "ok",
+                "profile": sel.profile,
+                "ratio": round(sel.ratio, 3) if sel.ratio != float("inf") else "inf",
+            }
+            for name, mid in (("bp", bp_mid), ("raw", raw_mid), ("grid", grid_mid)):
+                pred = midi_notes(mid)
+                f1_100, _, _ = note_f1(gt, pred, 0.1)
+                f1_50, _, _ = note_f1(gt, pred, 0.05)
+                row[f"{name}_f1_100"] = round(f1_100, 3)
+                row[f"{name}_f1_50"] = round(f1_50, 3)
+            row["grid_sr"] = score_rhythm_paths(gt_path, grid_mid)["total"]
+            rows.append(row)
+            print(
+                f"{slug}: profile={sel.profile} ratio={row['ratio']} "
+                f"bp={row['bp_f1_100']} raw={row['raw_f1_100']} grid={row['grid_f1_100']} "
+                f"sr={row['grid_sr']:.3f}"
+            )
+        except Exception as e:
+            rows.append({"slug": slug, "cat": cat, "status": f"FAIL {type(e).__name__}: {e}"})
+            print(f"{slug}: FAIL {e}")
+
+    ok = [r for r in rows if r["status"] == "ok"]
+    if ok:
+        n = len(ok)
+        avg = {k: sum(r[k] for r in ok) / n for k in
+               ("bp_f1_100", "bp_f1_50", "raw_f1_100", "raw_f1_50", "grid_f1_100", "grid_sr")}
+        # C3-4 疎曲劣化: normal選択曲は素点(bp)比の劣化がgrid側でどれだけかを見る
+        sparse = [r for r in ok if r["profile"] == "normal"]
+        worst_sparse = min((r["raw_f1_100"] - r["bp_f1_100"] for r in sparse), default=0.0)
+        print(f"\n# adaptive 集計 (n={n})")
+        print("| 指標 | 値 | 判定基準 |")
+        print("|---|---|---|")
+        print(f"| bp素点 F1@100ms | {avg['bp_f1_100']:.3f} | C1-1の分母 |")
+        print(f"| adaptive raw F1@100ms | {avg['raw_f1_100']:.3f} | ≥ bp素点 でC1-1合格 |")
+        print(f"| adaptive raw F1@50ms | {avg['raw_f1_50']:.3f} | C1-2(±50ms窓・記録) |")
+        print(f"| bp素点 F1@50ms | {avg['bp_f1_50']:.3f} | C1-2比較用 |")
+        print(f"| adaptive grid F1@100ms | {avg['grid_f1_100']:.3f} | 参考(格子側) |")
+        print(f"| adaptive grid score_rhythm | {avg['grid_sr']:.3f} | >0.387(素点)・≥0.402(回帰) |")
+        print(f"| 疎曲(normal選択)の最悪劣化 raw-bp | {worst_sparse:+.3f} | ≥-0.05 でC3-4合格 |")
+        print(f"| high選択曲 | {[r['slug'] for r in ok if r['profile']=='high']} | 期待: 高密度曲のみ |")
+    (OUT / "results_adaptive.json").write_text(json.dumps(rows, ensure_ascii=False, indent=1))
+    print("saved results_adaptive.json")
+
+
+if __name__ == "__main__" and "--adaptive" in sys.argv:
+    main_adaptive()
     sys.exit(0)

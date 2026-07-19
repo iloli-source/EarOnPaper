@@ -10,9 +10,21 @@ from dataclasses import asdict
 from pathlib import Path
 
 
-from earpipe.services.ear import apply_postfilter, detect_events, detect_events_poly, select_events
+from earpipe.services.ear import (
+    apply_postfilter,
+    detect_events,
+    detect_events_adaptive,
+    detect_events_poly,
+    select_events,
+)
 from earpipe.services.notate import to_score, write_midi, write_midi_raw, write_musicxml, write_pdf
-from earpipe.services.rhythm import BPM_DEFAULT, GRID_PER_BEAT, estimate_grid, quantize_events
+from earpipe.services.rhythm import (
+    BPM_DEFAULT,
+    GRID_PER_BEAT,
+    estimate_grid,
+    estimate_tempo_map,
+    quantize_events,
+)
 from earpipe.services.stem import analyze_field, denoise, load_audio
 
 
@@ -22,7 +34,7 @@ def transcribe_file(
     out_midi: str | Path | None = None,
     out_pdf: str | Path | None = None,
     engine: str = "mono",
-    sensitivity: str = "normal",
+    sensitivity: str = "auto",
     postfilter: bool = False,
     field_mode: bool = False,
     timing: str = "grid",
@@ -30,8 +42,10 @@ def transcribe_file(
 ) -> dict:
     """音声ファイルを採譜する。engine: mono(pYIN単音) / poly(basic-pitch多声)。
 
-    poly では #32(感度可変 sensitivity。high は PDベンチの score_rhythm で最良)と
-    #31(幽霊除去 postfilter)を適用できる。postfilter の既定は False —
+    poly の感度は密度適応 sensitivity="auto" が既定(Issue #54):
+    normal/high両感度で検出し、high/normal検出数比≥2.3で「normalが取りこぼす
+    高密度曲」と判定してhighを採用する(PD15曲で完全分離を実測)。
+    normal/high の明示指定(#32)と #31(幽霊除去 postfilter)も選べる。postfilter の既定は False —
     PD15曲実測で倍音フィルタが本物のオクターブ重ねを誤除去し平均で逆効果だったため
     (bench_out/results_rhythm_configs.json)。合成ケースでは設計どおり動くため
     オプトインで残し、再設計の方向性は Issue #31 クローズコメントに記録。
@@ -48,8 +62,19 @@ def transcribe_file(
         y_loaded, sr_loaded = load_audio(in_path)
         analysis = analyze_field(y_loaded, sr_loaded)
 
+    adaptive_report = None
     if engine == "poly":
-        events = detect_events_poly(in_path, sensitivity=sensitivity)
+        if sensitivity == "auto":
+            selection = detect_events_adaptive(in_path)
+            events = selection.events
+            adaptive_report = {
+                "profile": selection.profile,
+                "ratio": round(selection.ratio, 3) if selection.ratio != float("inf") else "inf",
+                "n_normal": selection.n_normal,
+                "n_high": selection.n_high,
+            }
+        else:
+            events = detect_events_poly(in_path, sensitivity=sensitivity)
         if postfilter:
             events = apply_postfilter(events)
     else:
@@ -93,9 +118,16 @@ def transcribe_file(
         "n_notes": len(notes),
         "bpm": bpm,
         "grid_per_beat": grid_per_beat,
+        # C2区間別テンポ系列(#56): 分析出力として先行提供。記譜は単一テンポ格子
+        # (区間別格子での記譜は将来課題。tempo_map.py docstring参照)
+        "tempo_map": [
+            [round(s.start_sec, 3), s.bpm] for s in estimate_tempo_map(events)
+        ],
         "timing": timing,
         "notes": notes,
     }
+    if adaptive_report is not None:
+        result["adaptive"] = adaptive_report
     if analysis is not None:
         result["field_report"] = asdict(analysis.report)
     if out_pdf:
@@ -123,8 +155,8 @@ def main(argv: list[str] | None = None) -> int:
         help="mono=pYIN単音(既定) / poly=basic-pitch多声",
     )
     pt.add_argument(
-        "--sensitivity", choices=("normal", "high"), default="normal",
-        help="poly検出感度。high=弱音を拾う低閾値(#32。postfilterと併用推奨)",
+        "--sensitivity", choices=("auto", "normal", "high"), default="auto",
+        help="poly検出感度。auto=密度適応の自動選択(既定・#54) / high=弱音を拾う低閾値(#32)",
     )
     pt.add_argument(
         "--postfilter", action="store_true",
