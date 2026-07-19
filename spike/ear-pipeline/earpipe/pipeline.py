@@ -17,6 +17,7 @@ from earpipe.services.ear import (
     detect_events_poly,
     select_events,
 )
+from earpipe.services.ear.tuning import correct_tuning_file
 from earpipe.services.notate import to_score, write_midi, write_midi_raw, write_musicxml, write_pdf
 from earpipe.services.rhythm import (
     BPM_DEFAULT,
@@ -56,6 +57,12 @@ def transcribe_file(
     将来課題。
     戻り値: engine / n_events / n_notes / bpm / notes。
     """
+    # C1基準ピッチ補正(#55): A=440から8cents以上ずれていれば補正済み一時wavに差し替える
+    # (in-tune入力は無補正パススルー)。一時ファイルは本関数終了時に削除する。
+    in_path_orig = in_path
+    in_path, tuning_offset = correct_tuning_file(in_path)
+    tuned_tmp = Path(in_path) if in_path != in_path_orig else None
+
     analysis = None
     y_loaded = None
     if field_mode:
@@ -111,8 +118,12 @@ def transcribe_file(
         else:
             write_midi(score, out_midi)
 
+    if tuned_tmp is not None:
+        tuned_tmp.unlink(missing_ok=True)
+
     result = {
-        "input": str(in_path),
+        "input": str(in_path_orig),
+        "tuning_offset_cents": round(tuning_offset, 1),
         "engine": engine,
         "n_events": len(events),
         "n_notes": len(notes),
