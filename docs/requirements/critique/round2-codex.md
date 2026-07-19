@@ -5,7 +5,7 @@
 **最終判定: 2/5。**  
 要求カタログとしては前進していますが、**実装者に渡せる要件定義ではありません**。理由は単純で、IDは増えたのに、合否を決める入力データ、期待出力、閾値、対象アプリ/OS/ランタイムのバージョン、評価手順がほとんど要件ID側に閉じていないためです。
 
-対象確認: 機能102件は [functional-requirements.md](REPO_ROOT/docs/requirements/functional-requirements.md:10)、非機能44件は [non-functional-requirements.md](REPO_ROOT/docs/requirements/non-functional-requirements.md:8)。
+対象確認: 機能102件は [functional-requirements.md](<repo>/docs/requirements/functional-requirements.md:10)、非機能44件は [non-functional-requirements.md](<repo>/docs/requirements/non-functional-requirements.md:8)。
 
 ## 1. 前回指摘の処理検証
 

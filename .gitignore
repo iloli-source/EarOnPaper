@@ -5,3 +5,6 @@ tools/ai-ears/testdata/
 tools/ai-ears/__pycache__/
 tools/ai-ears/.venv312/
 tools/ai-ears/tests/__pycache__/
+
+# 生成物・混入防止(サニタイズ 2026-07-20)
+docs/**/.*.log

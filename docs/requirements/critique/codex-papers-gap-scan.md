@@ -3,7 +3,7 @@
 Slackログは未投稿です。この環境では `send_message` 系のSlack送信ツールが公開されておらず、`tool_search` でも直接送信用アクションを取得できませんでした。
 
 **対象要件**
-[functional-requirements.md](REPO_ROOT/docs/requirements/functional-requirements.md:10) は `F-001`〜`F-075` の75件、[non-functional-requirements.md](REPO_ROOT/docs/requirements/non-functional-requirements.md:12) は `NF-001`〜`NF-031` の31件として確認しました。
+[functional-requirements.md](<repo>/docs/requirements/functional-requirements.md:10) は `F-001`〜`F-075` の75件、[non-functional-requirements.md](<repo>/docs/requirements/non-functional-requirements.md:12) は `NF-001`〜`NF-031` の31件として確認しました。
 
 **1. 欠落要件リスト**
 | 提案ID | 欠落要件 | 既存対応 | 提案カテゴリ | MoSCoW | 根拠 |

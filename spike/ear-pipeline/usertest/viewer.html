@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pitchsieve 体験テスト — 聴き比べビューア</title>
+<style>
+  :root {
+    --bg: oklch(97% 0.005 90);
+    --surface: oklch(99% 0.003 90);
+    --ink: oklch(28% 0.01 90);
+    --ink-dim: oklch(48% 0.01 90);
+    --line: oklch(90% 0.005 90);
+    --accent: oklch(55% 0.12 250);
+    --ok: oklch(58% 0.13 150);
+    --ok-bg: oklch(95% 0.03 150);
+    --mid: oklch(65% 0.13 75);
+    --mid-bg: oklch(96% 0.04 85);
+    --ng: oklch(55% 0.15 25);
+    --ng-bg: oklch(95% 0.03 25);
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Hiragino Sans", "Noto Sans JP", sans-serif;
+    line-height: 1.6;
+  }
+  header {
+    padding: 28px 32px 20px; border-bottom: 1px solid var(--line);
+    background: var(--surface);
+  }
+  header h1 { margin: 0 0 4px; font-size: 1.25rem; letter-spacing: 0.02em; }
+  header p { margin: 0; color: var(--ink-dim); font-size: 0.85rem; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 20px 80px; }
+  .howto {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 14px 18px; font-size: 0.85rem;
+    color: var(--ink-dim); margin-bottom: 24px;
+  }
+  .howto b { color: var(--ink); }
+  .card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); margin-bottom: 28px; overflow: hidden;
+  }
+  .card-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 12px; padding: 16px 20px 4px; flex-wrap: wrap;
+  }
+  .card-head h2 { margin: 0; font-size: 1.05rem; }
+  .meta { color: var(--ink-dim); font-size: 0.78rem; }
+  .players {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+    padding: 12px 20px;
+  }
+  @media (max-width: 700px) { .players { grid-template-columns: 1fr; } }
+  .player-box { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .player-box .tag { font-size: 0.78rem; font-weight: 600; margin-bottom: 6px; display: block; }
+  .player-box.original .tag { color: var(--ink-dim); }
+  .player-box.render .tag { color: var(--accent); }
+  audio { width: 100%; height: 36px; }
+  .pdf-row { padding: 4px 20px 12px; }
+  details summary {
+    cursor: pointer; font-size: 0.85rem; color: var(--accent);
+    user-select: none; padding: 4px 0;
+  }
+  details iframe {
+    width: 100%; height: 520px; border: 1px solid var(--line);
+    border-radius: 8px; background: white;
+  }
+  .pdf-link { font-size: 0.8rem; margin-left: 12px; }
+  .judge {
+    border-top: 1px dashed var(--line); padding: 14px 20px 18px;
+  }
+  .judge-label { font-size: 0.85rem; font-weight: 600; margin-bottom: 8px; }
+  .judge-btns { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .judge-btns button {
+    border-radius: 999px; padding: 8px 18px; font-size: 0.88rem;
+    cursor: pointer; background: var(--surface); color: var(--ink-dim);
+    border: 1.5px solid var(--line);
+    transition: transform 120ms ease, background 200ms ease, border-color 200ms ease;
+  }
+  .judge-btns button:hover { transform: translateY(-1px); }
+  .judge-btns button:active { transform: translateY(0); }
+  .judge-btns button.sel-same { background: var(--ok-bg); border-color: var(--ok); border-style: solid; color: var(--ok); font-weight: 700; }
+  .judge-btns button.sel-partial { background: var(--mid-bg); border-color: var(--mid); border-style: dashed; color: var(--mid); font-weight: 700; }
+  .judge-btns button.sel-diff { background: var(--ng-bg); border-color: var(--ng); border-style: dotted; color: var(--ng); font-weight: 700; }
+  textarea {
+    width: 100%; min-height: 60px; border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 0.85rem;
+    resize: vertical; background: var(--bg);
+  }
+  .saved-note { font-size: 0.75rem; color: var(--ok); margin-left: 8px; opacity: 0; transition: opacity 300ms; }
+  .saved-note.show { opacity: 1; }
+  .footer-bar {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: var(--surface); border-top: 1px solid var(--line);
+    padding: 10px 20px; display: flex; justify-content: space-between;
+    align-items: center; gap: 12px;
+  }
+  .footer-bar .progress { font-size: 0.82rem; color: var(--ink-dim); }
+  .footer-bar button {
+    background: var(--accent); color: white; border: none;
+    border-radius: 8px; padding: 9px 20px; font-size: 0.88rem; cursor: pointer;
+  }
+  .footer-bar button:disabled { opacity: 0.4; cursor: default; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎼 Pitchsieve 体験テスト — 聴き比べ</h1>
+  <p>自社エンジンの採譜結果を、ターゲットユーザー（楽譜不要）として判定します。すべて端末内のファイルです。</p>
+</header>
+<main>
+  <div class="howto">
+    <b>やり方（1曲あたり5〜8分）:</b>
+    ① 左の「元の録音」を30秒ほど聴く → ② 右の「採譜結果の再生音」を同じ箇所で聴く →
+    ③ 「同じ曲に聞こえるか」を3択で判定 → ④ 気づいたことがあれば一言メモ。
+    五線譜PDFは見た目の印象（それっぽいか・ぐちゃぐちゃか）だけでOKです。
+    判定は自動保存され、最後に下の「判定結果を書き出す」を押してファイルをAIに渡してください。
+  </div>
+  <div id="cards"></div>
+</main>
+<div class="footer-bar">
+  <span class="progress" id="progress"></span>
+  <button id="export">判定結果を書き出す</button>
+</div>
+<script src="manifest.js"></script>
+<script>
+const KEY = 'pitchsieve-usertest-v1';
+const store = JSON.parse(localStorage.getItem(KEY) || '{}');
+const CHOICES = [
+  { id: 'same',    label: '◯ 同じ曲に聞こえる', cls: 'sel-same' },
+  { id: 'partial', label: '◔ 部分的に同じ',     cls: 'sel-partial' },
+  { id: 'diff',    label: '✕ 別物',             cls: 'sel-diff' },
+];
+
+function save() { localStorage.setItem(KEY, JSON.stringify(store)); updateProgress(); }
+
+function fmtMeta(s) {
+  const bits = [];
+  if (s.engine) bits.push(s.engine === 'poly' ? '多声エンジン' : '単音エンジン');
+  if (s.bpm) bits.push(`推定テンポ ${Math.round(s.bpm)}`);
+  if (s.n_notes != null) bits.push(`音符 ${s.n_notes}個`);
+  if (s.processing_sec != null) bits.push(`処理 ${Math.round(s.processing_sec)}秒`);
+  if (s.fallback_note) bits.push('※monoフォールバック');
+  return bits.join(' ・ ');
+}
+
+const cards = document.getElementById('cards');
+(window.MANIFEST?.songs || []).forEach(song => {
+  const rec = store[song.id] = store[song.id] || { verdict: null, note: '' };
+  const card = document.createElement('section');
+  card.className = 'card';
+  card.innerHTML = `
+    <div class="card-head">
+      <h2>${song.label}</h2>
+      <span class="meta">${fmtMeta(song)}</span>
+    </div>
+    <div class="players">
+      <div class="player-box original">
+        <span class="tag">元の録音</span>
+        <audio controls preload="none" src="${song.original}"></audio>
+      </div>
+      <div class="player-box render">
+        <span class="tag">採譜結果の再生音（Pitchsieve）</span>
+        <audio controls preload="none" src="${song.render}"></audio>
+      </div>
+    </div>
+    <div class="pdf-row">
+      <details>
+        <summary>五線譜PDFを見る</summary>
+        <iframe src="${song.pdf}" loading="lazy"></iframe>
+      </details>
+      <a class="pdf-link" href="${song.pdf}" target="_blank">別タブで開く ↗</a>
+    </div>
+    <div class="judge">
+      <div class="judge-label">この採譜、元の曲と同じに聞こえますか？<span class="saved-note">保存しました</span></div>
+      <div class="judge-btns"></div>
+      <textarea placeholder="気づいたこと（任意）: 例. サビのメロディは合ってるがリズムが速い、など">${rec.note}</textarea>
+    </div>`;
+
+  const btnWrap = card.querySelector('.judge-btns');
+  const savedNote = card.querySelector('.saved-note');
+  CHOICES.forEach(c => {
+    const b = document.createElement('button');
+    b.textContent = c.label;
+    if (rec.verdict === c.id) b.classList.add(c.cls);
+    b.onclick = () => {
+      rec.verdict = c.id;
+      btnWrap.querySelectorAll('button').forEach((bb, i) =>
+        bb.className = CHOICES[i].id === c.id ? CHOICES[i].cls : '');
+      save();
+      savedNote.classList.add('show');
+      setTimeout(() => savedNote.classList.remove('show'), 1500);
+    };
+    btnWrap.appendChild(b);
+  });
+  card.querySelector('textarea').addEventListener('input', e => {
+    rec.note = e.target.value; save();
+  });
+  cards.appendChild(card);
+});
+
+function updateProgress() {
+  const songs = window.MANIFEST?.songs || [];
+  const done = songs.filter(s => store[s.id]?.verdict).length;
+  document.getElementById('progress').textContent =
+    `判定済み ${done} / ${songs.length} 曲`;
+  document.getElementById('export').disabled = done === 0;
+}
+updateProgress();
+
+document.getElementById('export').onclick = () => {
+  const songs = window.MANIFEST?.songs || [];
+  const out = {
+    exported_at: new Date().toISOString(),
+    results: songs.map(s => ({
+      id: s.id, label: s.label, engine: s.engine, bpm: s.bpm,
+      n_notes: s.n_notes,
+      verdict: store[s.id]?.verdict || null,
+      note: store[s.id]?.note || '',
+    })),
+  };
+  const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'usertest-results.json';
+  a.click();
+};
+</script>
+</body>
+</html>

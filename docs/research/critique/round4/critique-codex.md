@@ -2,7 +2,7 @@
 
 **投資委員会レビュー結論**
 
-対象: [conclusions-v4.md](REPO_ROOT/docs/research/conclusions-v4.md) / [round3 critique-summary.md](REPO_ROOT/docs/research/critique/round3/critique-summary.md)
+対象: [conclusions-v4.md](<repo>/docs/research/conclusions-v4.md) / [round3 critique-summary.md](<repo>/docs/research/critique/round3/critique-summary.md)
 
 辛口に言うと、プランB採択は許容。ただし v4 は「検証計画」としては前進しているが、「投資判断に耐えるプロトコル」としてはまだ甘い。特に G0 を条件付き通過扱いしている点と、G1 の評価設計を MIR 標準と呼べるかの扱いが危ない。
 

@@ -1,0 +1,84 @@
+{
+  "id": "u2",
+  "label": "U2 弾き語り（ボーカル＋アコースティックギター）",
+  "original": "input/u2.wav",
+  "render": "renders/u2_pitchsieve.wav",
+  "pdf": "output/u2.pdf",
+  "musicxml": "output/u2.musicxml",
+  "midi": "output/u2.mid",
+  "engine": "poly",
+  "bpm": 120.0,
+  "n_notes": 3291,
+  "n_events": 3291,
+  "tempo_map": [
+    [
+      0.0,
+      83.5
+    ],
+    [
+      10.0,
+      120.0
+    ],
+    [
+      50.0,
+      102.0
+    ],
+    [
+      60.0,
+      84.0
+    ],
+    [
+      70.0,
+      120.0
+    ],
+    [
+      80.0,
+      96.0
+    ],
+    [
+      90.0,
+      120.0
+    ],
+    [
+      120.0,
+      93.0
+    ],
+    [
+      130.0,
+      120.0
+    ],
+    [
+      150.0,
+      75.5
+    ],
+    [
+      160.0,
+      86.0
+    ],
+    [
+      170.0,
+      120.0
+    ],
+    [
+      180.0,
+      72.0
+    ],
+    [
+      190.0,
+      146.5
+    ],
+    [
+      200.0,
+      87.5
+    ]
+  ],
+  "adaptive": {
+    "profile": "high",
+    "ratio": 2.53,
+    "n_normal": 1301,
+    "n_high": 3291
+  },
+  "field_report": null,
+  "processing_sec": 18.4,
+  "fallback_note": null
+}
