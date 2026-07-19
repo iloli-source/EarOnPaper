@@ -1,10 +1,23 @@
 # EarOnPaper — 採譜プロジェクト (AI Music Transcription)
 
-> *Transcribing the world into music.* 製品名: **EarOnPaper**（ユーザー決定 2026-07-19）/ 耳エンジンのコードネーム: **Pitchsieve**
+> *Transcribing the world into music.* 製品名: **EarOnPaper** / 耳エンジンのコードネーム: **Pitchsieve**
 
 **絶対音感エミュレータ** — 雑音を含む日常録音から、絶対音感を持つ人のように音程成分だけを選択的に抽出して楽譜にする。非音楽家がターゲット。詳細: [プロダクトビジョン](docs/requirements/product-vision.md)
 
-## 現在地（2026-07-19）
+## エンジンを使ってみる
+
+採譜エンジン（Pitchsieve）は `spike/ear-pipeline/` にあります。**セットアップ・使い方は [`spike/ear-pipeline/README.md`](spike/ear-pipeline/README.md) を参照してください。**
+
+```bash
+# クローン後、3 コマンドで試せます
+cd spike/ear-pipeline
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python -m earpipe.pipeline transcribe 音源.wav -o 楽譜.musicxml
+```
+
+出力の `.musicxml` は MuseScore（無料）でそのまま開けます。
+
+## 現在地（2026-07-20）
 
 ※「フェーズ」は機能実装の P1スパイク/P2 MVP/P3将来構想 を指す（要件一覧参照）。下表はそれとは別の**プロジェクト工程**。
 
