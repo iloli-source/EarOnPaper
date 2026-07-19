@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 import librosa
 import numpy as np
+from scipy.ndimage import median_filter
 
 from earpipe.contracts import FieldReport
 
@@ -30,18 +31,29 @@ class FieldAnalysis:
     report: FieldReport
 
 
-def _estimate_snr_db(S: np.ndarray) -> float:
-    """スペクトルの雑音床分離による実SNR推定(dB)。
+_FLOOR_MEDIAN_BINS = 61  # 周波数方向メディアンフィルタの窓幅(ビン)。#51で較正:
+# 音程ピーク+漏れ裾(〜9ビン)を確実に棄却しつつ、褐色混合の±6dB追跡が保つ上限が61。
+# 81以上では低域傾斜の平滑化が過ぎて褐色混合の誤差が±6dBを超える(実測)。
 
-    各フレームで周波数ビンのパワー中央値を雑音床PSDとみなす
-    (音程成分は少数ビンに集中し中央値に影響しない。広帯域雑音は全ビンに広がる)。
+
+def _estimate_snr_db(S: np.ndarray) -> float:
+    """周波数方向メディアンフィルタによる雑音床分離の実SNR推定(dB)。
+
+    各フレームのパワースペクトルに周波数方向の移動中央値(窓61ビン)をかけ、
+    その結果を雑音床PSDとみなす。中央値は滑らかなスペクトル傾斜には追従し
+    (単調列の中央値=中央要素)、窓幅より狭い音程ピーク+漏れ裾は棄却するため、
+    スペクトル傾斜に依存しない — 全ビン一括の中央値は白色雑音専用で、
+    低域偏重の有色雑音(褐色・空調・残響尾)では大半のビンが静かなため床を
+    過小評価し、純雑音を est_snr=44dB/clean と誤報した(#51 R2-S1で実証)。
     ガウス雑音のビンパワーは指数分布のため中央値をln2で平均に補正し、
-    雑音総パワー = 補正中央値 × ビン数、信号 = 総パワー − 雑音、として
+    雑音総パワー = Σ床、信号 = 総パワー − 雑音、として
     アクティブフレーム合算のSNRを返す。0〜_SNR_MAX_DBにクランプ。
 
-    限界(正直な記録): ドラム等の広帯域「音楽」成分も雑音側に数える。
-    音程抽出の観点では妥当(音程の敵はすべて床)だが、絶対SNRとは意味が
-    ずれる場面がある。既知SNR混合での誤差は±6dB水準(テスト固定)。
+    限界(正直な記録): ①ドラム等の広帯域「音楽」成分も雑音側に数える
+    (音程抽出の観点では妥当)。②窓幅(61ビン≈650Hz)より広がる狭帯域雑音の
+    集合(ハム+倍音列など)は信号側に数えられうる。③残響尾は信号のスペクトル
+    形状に従うため大部分が信号側に残る(残響はSNRでなく別途の課題)。
+    白色/ピンク/褐色の既知SNR混合での誤差は±6dB水準(テスト固定)。
     """
     P = S.astype(np.float64) ** 2  # (bins, frames) パワー
     frame_total = P.sum(axis=0)
@@ -51,8 +63,11 @@ def _estimate_snr_db(S: np.ndarray) -> float:
     if not bool(active.any()):
         return 0.0
     Pa = P[:, active]
-    n_bins = Pa.shape[0]
-    noise_per_frame = np.median(Pa, axis=0) / _MEDIAN_TO_MEAN * n_bins
+    floor = (
+        median_filter(Pa, size=(_FLOOR_MEDIAN_BINS, 1), mode="nearest")
+        / _MEDIAN_TO_MEAN
+    )
+    noise_per_frame = floor.sum(axis=0)
     total_per_frame = Pa.sum(axis=0)
     signal_per_frame = np.maximum(total_per_frame - noise_per_frame, 0.0)
     noise = float(noise_per_frame.sum()) + 1e-30
