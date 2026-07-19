@@ -12,7 +12,7 @@
 | 2. ビジョン | **確定** | [絶対音感エミュレータ](docs/requirements/product-vision.md)（科学・当事者・市場の3方向で裏づけ済み・判定哲学含む） |
 | 3. 要件定義 | **v2.7確定水準** | [機能一覧117件](docs/requirements/functional-requirements.md)・[非機能一覧50件](docs/requirements/non-functional-requirements.md)・[HTMLビューア](docs/requirements/requirements-viewer.html)（批判3巡＋トレーサビリティ監査済み） |
 | 4. UI/UX方針 | **確定** | [デザイン方針書](docs/requirements/uiux/uiux-direction.md)（静かな工房60% × 進化する下書き30% × 弾ける歓び10%＋波形・計器・懐かしさ追補） |
-| 5. 評価基盤 | **実装済み** | [AIの耳ハーネス](tools/ai-ears/)（4指標・自己検証7/7合格。第二の耳=Gemini音声判定はクォータ回復後に実動テスト） |
+| 5. 評価基盤 | **実装済み** | [AIの耳ハーネス](tools/ai-ears/)（4指標・自己検証合格・pytest 49件） |
 | 6. 実測検証（G0'〜） | **着手可能** | [G0'実施キット](docs/research/g0-prime-kit.md)完備。必要なのはユーザーの音源3曲＋聴き比べ20-30分のみ（Issue #13） |
 | 7. ツール開発・事業判断 | 未着手 | 4ゲート通過時のみ。磨き込み順序はG0'実測後に決定 |
 
@@ -64,7 +64,7 @@ tools/
 ## 運用メモ
 
 - 要件はJSON単一ソースからMD/HTMLを自動生成（内容乖離防止）
-- 調査は多モデル分担: grok=X実ユーザー / codex=論文・規格 / Claude=Web・統合 / gemini=補完（クォータ回復時。CLIは故障中・REST API直叩き）
+- 調査は多モデル分担: grok=X実ユーザー / codex=論文・規格 / Claude=Web・統合
 - 定点観測: MuseScore audio2scoreβの品質を週次15分で実測（kill switch 3条件はspec §7）
 - 前提が転換したら既存文書を連鎖更新する（「仕様に書いてある」を防衛根拠にしない）
 - **Issue駆動開発**: 開発作業はIssueを立ててから着手し、進捗・検証結果をIssueに記録、完了時に結果つきでクローズ（devラベル）

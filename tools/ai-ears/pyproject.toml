@@ -7,7 +7,6 @@ markers = [
 
 [tool.coverage.run]
 # 対象は審判本体の ears.py。
-# gemini_ears.py は外部API(Gemini)依存のため対象外 — 純粋関数部(load_key/to_wav_bytes/PROMPT)は
 # tests/test_cli.py でテストするが、judge/main はクォータ・ネットワーク依存でCI再現性がないため
 # カバレッジゲートから除外する(理由記録)。実動確認は Issue #23 で実施。
 # synth_test.py はテスト用fixture生成モジュールのため対象外。

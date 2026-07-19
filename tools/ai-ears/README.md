@@ -7,7 +7,6 @@
 | ファイル | 役割 |
 |---|---|
 | `ears.py` | 計算の耳。元音源と採譜MIDIを数値比較（音高一致・出だし一致・テンポ整合・譜面健全性） |
-| `gemini_ears.py` | 第二の耳。Gemini音声入力モデルに聴き比べさせ音楽的判定をJSONで得る |
 | `synth_test.py` | ハーネス自体の自己検証（正解つき感度テスト） |
 | `validation-report.md` | 自己検証の結果（7/7 PASS・既知の限界の正直な記録） |
 
@@ -28,15 +27,11 @@ python3 -m venv .venv
 # 譜面健全性だけの単体検査（音源不要）
 .venv/bin/python ears.py inspect --transcription 採譜結果.mid
 
-# 音楽的判定（Gemini・クォータ回復後に実行可）
-.venv/bin/python gemini_ears.py --original 元音源.mp3 --transcription 採譜結果.mid
-```
 
 ## G0'での運用フロー
 
 1. 検証3曲（ユーザー保有音源）を MuScriptor 等に投入 → 出力MIDIを取得（AI代行可）
 2. 各出力を `ears.py compare` にかけ、曲×ツールのスコア表を作る
-3. `gemini_ears.py` で音楽的判定（使える下書きか・手直し量の見立て・**問題が耳起因か記譜起因か**）を重ねる
 4. 2つの耳のレポートを G0' 台帳（`docs/research/g0-prime-kit.md`）に転記して判定
 
 ## 指標の読み方（音楽用語なしで）

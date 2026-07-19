@@ -1,4 +1,4 @@
-"""CLI(compare/inspect)の実挙動テストと、gemini_ears の純粋関数のテスト。"""
+"""CLI(compare/inspect)の実挙動テスト。"""
 
 import json
 import subprocess
@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-import gemini_ears
 
 HARNESS_DIR = Path(__file__).resolve().parent.parent
 PYTHON = str(HARNESS_DIR / ".venv/bin/python")
@@ -49,32 +48,6 @@ class TestCli:
         assert proc.returncode != 0
 
 
-@pytest.mark.unit
-class TestGeminiEarsPureParts:
-    """gemini_ears のAPI非依存部分のみテスト(API呼び出し部はカバレッジ除外・理由はconfig参照)。"""
-
-    def test_load_key_reads_env_file(self, monkeypatch, tmp_path):
-        gem_dir = tmp_path / ".gemini"
-        gem_dir.mkdir()
-        (gem_dir / ".env").write_text('GEMINI_API_KEY="test-key-123"\n')
-        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-        assert gemini_ears.load_key() == "test-key-123"
-
-    def test_load_key_missing_exits(self, monkeypatch, tmp_path):
-        gem_dir = tmp_path / ".gemini"
-        gem_dir.mkdir()
-        (gem_dir / ".env").write_text("OTHER=1\n")
-        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-        with pytest.raises(SystemExit):
-            gemini_ears.load_key()
-
-    def test_to_wav_bytes_passthrough(self, reference_audio):
-        data = gemini_ears.to_wav_bytes(str(reference_audio))
-        assert data[:4] == b"RIFF"
-
-    def test_prompt_requests_structured_json(self):
-        assert "ear_or_notation" in gemini_ears.PROMPT
-        assert "estimated_fix_effort" in gemini_ears.PROMPT
 
 
 if __name__ == "__main__":
