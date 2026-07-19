@@ -10,11 +10,30 @@
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
 
+def _install_net_guard() -> None:
+    """受入C7(通信ゼロ): EARPIPE_FORBID_NET 設定時にネットワークを遮断する。
+
+    推論経路が外部接続を試みた瞬間に失敗させることで、subprocess側まで含めた
+    「完全ローカル動作」をテスト可能にする(Issue #44)。
+    """
+    import socket
+
+    def _no_net(*_a: object, **_k: object) -> None:
+        raise RuntimeError("EARPIPE_FORBID_NET: bp_worker内でネットワーク接続が試行された")
+
+    socket.socket.connect = _no_net  # type: ignore[method-assign]
+    socket.create_connection = _no_net  # type: ignore[assignment]
+    socket.getaddrinfo = _no_net  # type: ignore[assignment]
+
+
 def main() -> int:  # pragma: no cover (3.12側で実行されE2E/エラー系テストで検証)
+    if os.environ.get("EARPIPE_FORBID_NET"):
+        _install_net_guard()
     # 引数バリデーションは重い import より前に行う(レビューHIGH-1)
     if len(sys.argv) < 2:
         print(
