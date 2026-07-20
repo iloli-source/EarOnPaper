@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'self' filesystem:; frame-src 'self' filesystem:;">
+  <title>EarOnPaper</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <div class="titlebar">
+      <span class="titlebar-title">EarOnPaper</span>
+    </div>
+
+    <main class="main">
+
+      <!-- IDLE: ドロップゾーン -->
+      <div id="state-idle" class="state active">
+        <div class="dropzone" id="dropzone">
+          <div class="waveform">
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+            <div class="waveform-bar"></div>
+          </div>
+          <div class="drop-label">音声ファイルをここにドロップ</div>
+          <div class="drop-sub">または</div>
+          <button class="btn-open" id="btn-open">ファイルを選ぶ</button>
+          <div class="drop-formats">wav · mp3 · flac · m4a · aiff</div>
+        </div>
+        <div class="engine-select">
+          <button class="engine-btn active" data-engine="mono">
+            <span class="engine-name">単旋律</span>
+            <span class="engine-desc">高速・シンプルな曲向け</span>
+          </button>
+          <button class="engine-btn" data-engine="poly">
+            <span class="engine-name">多声</span>
+            <span class="engine-desc">ポップス・複雑な曲向け</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- PROCESSING: 処理中 -->
+      <div id="state-processing" class="state">
+        <div class="processing-title">採譜しています...</div>
+        <div class="processing-file" id="processing-file"></div>
+        <div class="progress-bar-wrap">
+          <div class="progress-bar"></div>
+        </div>
+        <div class="progress-log" id="progress-log"></div>
+      </div>
+
+      <!-- DONE: 完了 -->
+      <div id="state-done" class="state">
+        <div class="score-panel" id="score-panel">
+          <div class="score-placeholder" id="score-placeholder">
+            <span>📄</span>
+            <span>楽譜を読み込み中...</span>
+          </div>
+        </div>
+        <div class="sidebar">
+          <div class="result-card">
+            <div class="result-card-title">採譜結果</div>
+            <div class="result-stat">
+              <span class="result-stat-label">音符数</span>
+              <span class="result-stat-value" id="stat-notes">—</span>
+            </div>
+            <div class="result-stat">
+              <span class="result-stat-label">テンポ</span>
+              <span class="result-stat-value" id="stat-bpm">—</span>
+            </div>
+            <div class="result-stat">
+              <span class="result-stat-label">エンジン</span>
+              <span class="result-stat-value" id="stat-engine">—</span>
+            </div>
+            <div class="result-stat">
+              <span class="result-stat-label">チューニング</span>
+              <span class="result-stat-value" id="stat-tuning">—</span>
+            </div>
+          </div>
+
+          <div class="result-card">
+            <div class="result-card-title">エクスポート</div>
+            <div class="export-buttons">
+              <button class="btn-export" id="btn-export-pdf">
+                <span class="btn-export-icon">📄</span>PDF（楽譜）
+              </button>
+              <button class="btn-export" id="btn-export-musicxml">
+                <span class="btn-export-icon">🎼</span>MusicXML
+              </button>
+              <button class="btn-export" id="btn-export-midi">
+                <span class="btn-export-icon">🎹</span>MIDI
+              </button>
+            </div>
+          </div>
+
+          <button class="btn-retry" id="btn-retry">← 別のファイルを採譜</button>
+        </div>
+      </div>
+
+      <!-- ERROR: エラー -->
+      <div id="state-error" class="state">
+        <div class="error-icon">⚠️</div>
+        <div class="error-title">採譜に失敗しました</div>
+        <pre class="error-message" id="error-message"></pre>
+        <button class="btn-copy-error" id="btn-copy-error">エラーをコピー</button>
+        <button class="btn-back" id="btn-error-back">最初に戻る</button>
+      </div>
+
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

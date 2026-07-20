@@ -1,0 +1,12 @@
+{
+  "name": "earpaper",
+  "version": "0.1.0",
+  "description": "EarOnPaper — 音声を楽譜に変換するデスクトップアプリ",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron": "^32.0.0"
+  }
+}
