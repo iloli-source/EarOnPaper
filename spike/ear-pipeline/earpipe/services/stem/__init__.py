@@ -4,7 +4,11 @@ from earpipe.services.stem.field import (
     classify_segment,
     denoise,
 )
-from earpipe.services.stem.preprocess import load_audio
+from earpipe.services.stem.preprocess import (
+    load_audio,
+    trim_leading_silence,
+    trim_leading_silence_file,
+)
 
 __all__ = [
     "FieldAnalysis",
@@ -12,4 +16,6 @@ __all__ = [
     "classify_segment",
     "denoise",
     "load_audio",
+    "trim_leading_silence",
+    "trim_leading_silence_file",
 ]
