@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 contextBridge.exposeInMainWorld('earpipe', {
-  transcribe: (filePath, engine) => ipcRenderer.invoke('transcribe', filePath, engine),
+  transcribe: (filePath, engine, title) => ipcRenderer.invoke('transcribe', filePath, engine, title),
   openFileDialog: () => ipcRenderer.invoke('open-file-dialog'),
   saveFile: (src, ext, name) => ipcRenderer.invoke('save-file', src, ext, name),
   openExternal: (filePath) => ipcRenderer.invoke('open-external', filePath),

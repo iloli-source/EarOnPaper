@@ -1,14 +1,116 @@
 /* EarOnPaper Renderer */
 
-let selectedEngine = 'mono'
+// ステージ定義
+const STAGES = [
+  { index: 0, label: '音声読み込み中...', keywords: ['librosa', 'loading', 'reading', 'audio'] },
+  { index: 1, label: '音高検出中...',     keywords: ['detect', 'pyin', 'adaptive', 'pitch', 'onset'] },
+  { index: 2, label: 'リズム量子化中...', keywords: ['quantize', 'rhythm', 'tempo', 'meter', 'beat'] },
+  { index: 3, label: '楽譜生成中...',     keywords: ['score', 'notate', 'spell', 'key', 'measure'] },
+  { index: 4, label: 'PDF書き出し中...', keywords: ['engrave', 'pdf', 'verovio', 'svg'] },
+]
 
-document.querySelectorAll('.engine-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.engine-btn').forEach(b => b.classList.remove('active'))
-    btn.classList.add('active')
-    selectedEngine = btn.dataset.engine
+let currentStage = 0
+let stageTimers = []
+const STAGE_DELAYS = [0, 4000, 14000, 24000, 34000] // ms
+
+function clearStageTimers() {
+  stageTimers.forEach(clearTimeout)
+  stageTimers = []
+}
+
+// 譜面タイトル: 拡張子と末尾のフォーマット表記(mp3等)を除いた曲名にする
+function cleanTitle(fileName) {
+  const base = fileName.replace(/\.[^.]+$/, '')
+  const cleaned = base.replace(/[\s_-]*(mp3|wav|m4a|flac|aiff|ogg)$/i, '').trim()
+  return cleaned || base
+}
+
+function setStage(index) {
+  if (index <= currentStage && currentStage > 0) return
+  currentStage = index
+
+  const label = document.getElementById('stage-label')
+  if (label) label.textContent = STAGES[index]?.label ?? '処理中...'
+
+  const bar = document.getElementById('stage-progress-bar')
+  if (bar) bar.style.width = `${(index / (STAGES.length - 1)) * 85}%`
+
+  document.querySelectorAll('.stage-step').forEach((el, i) => {
+    el.classList.remove('active', 'done')
+    if (i < index) el.classList.add('done')
+    else if (i === index) el.classList.add('active')
   })
-})
+
+  document.querySelectorAll('.stage-connector').forEach((el, i) => {
+    el.classList.toggle('done', i < index)
+  })
+}
+
+function detectStageFromLog(line) {
+  const lower = line.toLowerCase()
+  for (let i = STAGES.length - 1; i >= 0; i--) {
+    if (STAGES[i].keywords.some(k => lower.includes(k))) {
+      return i
+    }
+  }
+  return -1
+}
+
+const NOTE_CHARS = ['♩','♪','♫','♬','𝄞','♩','♪']
+const NOTE_COLORS = [
+  'oklch(78% 0.22 55)', 'oklch(74% 0.22 140)', 'oklch(70% 0.21 250)',
+  'oklch(74% 0.22 320)', 'oklch(76% 0.22 20)', 'oklch(76% 0.19 180)',
+]
+
+function spawnFlyingNotes(container) {
+  container.innerHTML = ''
+  const W = container.offsetWidth / 2 || 400
+  const H = container.offsetHeight / 2 || 300
+  for (let i = 0; i < 22; i++) {
+    const el = document.createElement('div')
+    el.className = 'fly-note'
+    el.textContent = NOTE_CHARS[i % NOTE_CHARS.length]
+    el.style.color = NOTE_COLORS[i % NOTE_COLORS.length]
+    el.style.filter = `drop-shadow(0 0 8px ${NOTE_COLORS[i % NOTE_COLORS.length]})`
+
+    const side = i % 4
+    let sx, sy
+    if (side === 0) { sx = (Math.random() * 2 - 1) * W; sy = -(H + 40) }
+    else if (side === 1) { sx = (Math.random() * 2 - 1) * W; sy = H + 40 }
+    else if (side === 2) { sx = -(W + 40); sy = (Math.random() * 2 - 1) * H }
+    else { sx = W + 40; sy = (Math.random() * 2 - 1) * H }
+
+    el.style.setProperty('--sx', `${sx}px`)
+    el.style.setProperty('--sy', `${sy}px`)
+    el.style.setProperty('--sr', `${(Math.random() - 0.5) * 60}deg`)
+    el.style.setProperty('--er', `${(Math.random() - 0.5) * 90}deg`)
+    el.style.setProperty('--dur', `${1.8 + Math.random() * 2.2}s`)
+    el.style.setProperty('--del', `${Math.random() * 3}s`)
+    container.appendChild(el)
+  }
+}
+
+function playChime() {
+  try {
+    const ctx = new AudioContext()
+    const freqs = [523.25, 659.25, 783.99] // C5, E5, G5
+    freqs.forEach((freq, i) => {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.frequency.value = freq
+      osc.type = 'sine'
+      const t = ctx.currentTime + i * 0.06
+      gain.gain.setValueAtTime(0, t)
+      gain.gain.linearRampToValueAtTime(0.18, t + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.8)
+      osc.start(t)
+      osc.stop(t + 0.8)
+    })
+  } catch {}
+}
+
 
 const states = {
   idle: document.getElementById('state-idle'),
@@ -69,30 +171,46 @@ async function triggerFileOpen() {
 
 // ===== PROCESSING =====
 
-const processingFile = document.getElementById('processing-file')
-const progressLog = document.getElementById('progress-log')
 
 async function startTranscribe(filePath, fileName) {
-  processingFile.textContent = fileName
-  progressLog.textContent = ''
+  const title = cleanTitle(fileName)
+  document.getElementById('processing-file').textContent = title
+  currentStage = -1
+  setStage(0)
   showState('processing')
+  const notesBg = document.getElementById('notes-bg')
+  if (notesBg) spawnFlyingNotes(notesBg)
 
-  // 進捗ログ受信
-  if (removeProgressListener) removeProgressListener()
-  removeProgressListener = window.earpipe.onProgress((line) => {
-    progressLog.textContent += line + '\n'
-    progressLog.scrollTop = progressLog.scrollHeight
+  // 時間ベースでステージを自動進行。完了/失敗時に必ず全部止める
+  // (単一ハンドル保持だと残ったタイマーが完了後に発火しステージ表示が巻き戻る)
+  clearStageTimers()
+  STAGE_DELAYS.forEach((delay, i) => {
+    if (i === 0) return
+    stageTimers.push(setTimeout(() => setStage(i), delay))
   })
 
+  if (removeProgressListener) removeProgressListener()
+  removeProgressListener = window.earpipe.onProgress(() => {})
+
   try {
-    const result = await window.earpipe.transcribe(filePath, selectedEngine)
+    const result = await window.earpipe.transcribe(filePath, 'poly', title)
+    clearStageTimers()
     if (removeProgressListener) {
       removeProgressListener()
       removeProgressListener = null
     }
     currentResult = result
-    showResult(result)
+    // 完了: バー100%→チャイム→結果表示
+    const bar = document.getElementById('stage-progress-bar')
+    if (bar) bar.style.width = '100%'
+    document.querySelectorAll('.stage-step').forEach(el => el.classList.add('done'))
+    document.querySelectorAll('.stage-connector').forEach(el => el.classList.add('done'))
+    setTimeout(() => {
+      playChime()
+      showResult(result)
+    }, 300)
   } catch (err) {
+    clearStageTimers()
     if (removeProgressListener) {
       removeProgressListener()
       removeProgressListener = null

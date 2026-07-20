@@ -43,7 +43,8 @@ ipcMain.handle('open-file-dialog', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
     filters: [
-      { name: '音声ファイル', extensions: ['wav', 'mp3', 'flac', 'ogg', 'm4a', 'aiff'] },
+      { name: '音声ファイル', extensions: ['wav', 'mp3', 'flac', 'ogg', 'm4a', 'aiff', 'aac', 'opus', 'mp4'] },
+      { name: 'すべてのファイル', extensions: ['*'] },
     ],
   })
   return result.canceled ? null : result.filePaths[0]
@@ -66,7 +67,7 @@ ipcMain.handle('open-external', async (_, filePath) => {
 })
 
 // 採譜実行
-ipcMain.handle('transcribe', async (event, inputPath, engine = 'mono') => {
+ipcMain.handle('transcribe', async (event, inputPath, engine = 'mono', title = '') => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-'))
   const baseName = path.basename(inputPath, path.extname(inputPath))
   const outMusicxml = path.join(tmpDir, `${baseName}.musicxml`)
@@ -76,12 +77,14 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'mono') => {
   return new Promise((resolve, reject) => {
     const isPoly = engine === 'poly'
     const args = [
+      '-W', 'ignore::RuntimeWarning',
       '-m', 'earpipe.pipeline', 'transcribe', inputPath,
       '-o', outMusicxml,
       '--pdf', outPdf,
       '--midi', outMidi,
       '--engine', isPoly ? 'poly' : 'mono',
     ]
+    if (title) args.push('--title', title)
 
     const env = { ...process.env }
     if (isPoly) env.EARPIPE_BP_PYTHON = PYTHON312
