@@ -1,0 +1,9 @@
+# ステム分離(F-003)用の別venv依存。torchが重いため本体requirements.txtとは分離する。
+# セットアップ:
+#   python3.12 -m venv .venv-demucs
+#   .venv-demucs/bin/pip install -r requirements-demucs.txt
+# 採譜側(本体.venv)からは環境変数 EARPIPE_DEMUCS_PYTHON に .venv-demucs/bin/python を指すか、
+# .venv-demucs を自動探索(earpipe/services/stem/separate.py)。
+demucs==4.1.0
+numpy
+soundfile

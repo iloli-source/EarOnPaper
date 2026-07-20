@@ -8,6 +8,9 @@ tools/ai-ears/tests/__pycache__/
 
 # 生成物・混入防止(サニタイズ 2026-07-20)
 docs/**/.*.log
+spike/ear-pipeline/.venv/
+spike/ear-pipeline/.venv-demucs/
+**/__pycache__/
 spike/ear-pipeline/usertest/input/
 spike/ear-pipeline/usertest/output/
 spike/ear-pipeline/usertest/renders/

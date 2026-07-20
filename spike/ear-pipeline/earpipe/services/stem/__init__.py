@@ -9,6 +9,15 @@ from earpipe.services.stem.preprocess import (
     trim_leading_silence,
     trim_leading_silence_file,
 )
+from earpipe.services.stem.separate import (
+    MELODIC_STEMS,
+    STEMS,
+    SeparationResult,
+    StemSeparationUnavailable,
+    demucs_available,
+    demucs_python_path,
+    separate_stems,
+)
 
 __all__ = [
     "FieldAnalysis",
@@ -18,4 +27,11 @@ __all__ = [
     "load_audio",
     "trim_leading_silence",
     "trim_leading_silence_file",
+    "MELODIC_STEMS",
+    "STEMS",
+    "SeparationResult",
+    "StemSeparationUnavailable",
+    "demucs_available",
+    "demucs_python_path",
+    "separate_stems",
 ]

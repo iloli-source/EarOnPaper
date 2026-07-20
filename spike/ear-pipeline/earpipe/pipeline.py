@@ -6,6 +6,8 @@
 
 import argparse
 import json
+import shutil
+import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
@@ -36,7 +38,15 @@ from earpipe.services.rhythm import (
     estimate_tempo_map,
     quantize_events,
 )
-from earpipe.services.stem import analyze_field, denoise, load_audio, trim_leading_silence_file
+from earpipe.services.stem import (
+    MELODIC_STEMS,
+    STEMS,
+    analyze_field,
+    denoise,
+    load_audio,
+    separate_stems,
+    trim_leading_silence_file,
+)
 
 
 def transcribe_file(
@@ -53,6 +63,7 @@ def transcribe_file(
     timing: str = "grid",
     title: str | None = None,
     chord_diagrams: bool = True,
+    stem: str | None = None,
 ) -> dict:
     """音声ファイルを採譜する。engine: auto(既定・#64) / mono(pYIN単音) / poly(basic-pitch多声)。
 
@@ -73,10 +84,27 @@ def transcribe_file(
     将来課題。
     戻り値: engine / n_events / n_notes / bpm / notes。
     """
+    in_path_orig = in_path
+
+    # ステム分離(F-003): --stem 指定時は先に音源を4ステム分離し、指定ステムだけを
+    # 以降の採譜対象にする(楽器毎に分けて譜面化するユーザー要望)。分離は重い前処理で
+    # アーティファクトが採譜を悪化させうるためオプトイン(先行リサーチの反映)。
+    # 分離wavは一時ディレクトリに出力し、本関数終了時に片付ける。
+    stem_tmp_dir = None
+    stem_used = None
+    if stem is not None:
+        if stem not in STEMS:
+            raise ValueError(f"--stem は {STEMS} のいずれか(指定: {stem!r})")
+        stem_tmp_dir = Path(tempfile.mkdtemp(prefix="earpipe_stem_"))
+        result_sep = separate_stems(in_path, stem_tmp_dir)
+        if stem not in result_sep.stems:
+            raise ValueError(f"ステム {stem!r} が分離結果に存在しません")
+        in_path = result_sep.stems[stem]
+        stem_used = stem
+
     # 先頭無音トリム: 曲前の無音は楽譜の頭を休符にして精度を落とすため、
     # 音が鳴ったところから採譜する(ユーザー実証 2026-07-20: 0.67秒カットで精度向上)。
     # カットがあった場合のみ一時wavが作られ、本関数終了時に削除する。
-    in_path_orig = in_path
     trimmed_path, trimmed_sec = trim_leading_silence_file(in_path)
     trim_tmp = trimmed_path if trimmed_path != Path(in_path_orig) else None
 
@@ -147,7 +175,7 @@ def transcribe_file(
     if events:
         bpm, grid_per_beat = estimate_grid(events)  # 格子系(2分/3分)も同時推定(#39)
         notes = quantize_events(
-            events, bpm, mono=(engine == "mono"), grid_per_beat=grid_per_beat
+            events, bpm, mono=(resolved_engine == "mono"), grid_per_beat=grid_per_beat
         )
         # 記譜アンカー: フェードイン等でトリムが届かない残り無音が先頭休符に
         # ならないよう、最初の音符を0拍目に揃える(格子側のみ。実タイミング保持)
@@ -161,7 +189,10 @@ def transcribe_file(
     # 曲名メタデータの貫通(#42): 未指定なら入力ファイル名を使う。
     # in_path はトリム/補正後の一時ファイルを指すため、必ず元入力名(in_path_orig)を使う
     # (バグ修正: 一時ファイル名 earpipe_xxxx_trimmed が譜面タイトルに漏れていた)
-    score = to_score(notes, bpm, title=title or Path(in_path_orig).stem)
+    base_title = title or Path(in_path_orig).stem
+    # ステム分離時はどの楽器の譜面か分かるようステム名を併記する
+    effective_title = f"{base_title} ({stem_used})" if stem_used else base_title
+    score = to_score(notes, bpm, title=effective_title)
     if out_musicxml:
         write_musicxml(score, out_musicxml)  # 譜面は常に格子側(楽譜=量子化表現)
     if out_midi:
@@ -175,9 +206,12 @@ def transcribe_file(
         tuned_tmp.unlink(missing_ok=True)
     if trim_tmp is not None:
         trim_tmp.unlink(missing_ok=True)
+    if stem_tmp_dir is not None:
+        shutil.rmtree(stem_tmp_dir, ignore_errors=True)
 
     result = {
         "input": str(in_path_orig),
+        "stem": stem_used,
         "trimmed_leading_sec": round(trimmed_sec, 3),
         "anchored_lead_beats": round(anchored_lead_beats, 3),
         "tuning_offset_cents": round(tuning_offset, 1),
@@ -267,7 +301,25 @@ def main(argv: list[str] | None = None) -> int:
         "--timing", choices=("grid", "raw"), default="grid",
         help="MIDIエクスポートのタイミング表現(C3二重表現)。grid=格子(既定・楽譜整合) / raw=実タイミング(評価・DAW向け)",
     )
+    pt.add_argument(
+        "--stem", choices=STEMS, default=None,
+        help="ステム分離(F-003)して指定楽器だけを採譜(vocals/drums/bass/other・要Demucs)",
+    )
+
+    # 楽器毎に分けて譜面化(F-003): 1回の分離で旋律ステム各々を別々の譜面にする
+    ps = sub.add_parser("separate-transcribe", help="ステム分離して楽器毎に別々の譜面を生成")
+    ps.add_argument("input", help="入力音声(wav/mp3等)")
+    ps.add_argument("--out-dir", required=True, help="ステム別の譜面出力先ディレクトリ")
+    ps.add_argument("--title", help="譜面タイトル(既定: 入力ファイル名+ステム名)")
+    ps.add_argument(
+        "--include-drums", action="store_true",
+        help="drums(非音程)も採譜対象に含める(既定: 旋律ステムのみ)",
+    )
+
     args = p.parse_args(argv)
+
+    if args.command == "separate-transcribe":
+        return _run_separate_transcribe(args)
 
     out = args.output or str(Path(args.input).with_suffix(".musicxml"))
     result = transcribe_file(
@@ -284,10 +336,46 @@ def main(argv: list[str] | None = None) -> int:
         field_mode=args.field_mode,
         timing=args.timing,
         title=args.title,
+        stem=args.stem,
     )
     summary = {k: v for k, v in result.items() if k != "notes"}
     summary["output"] = out
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _run_separate_transcribe(args) -> int:
+    """楽器毎に分けて譜面化(F-003): 分離は1回だけ行い、各旋律ステムを別譜面に採譜。"""
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    base = args.title or Path(args.input).stem
+
+    stem_dir = Path(tempfile.mkdtemp(prefix="earpipe_sep_"))
+    try:
+        sep = separate_stems(args.input, stem_dir)
+        targets = STEMS if args.include_drums else MELODIC_STEMS
+        per_stem = []
+        for name in targets:
+            if name not in sep.stems:
+                continue
+            out_xml = out_dir / f"{base}_{name}.musicxml"
+            out_pdf = out_dir / f"{base}_{name}.pdf"
+            # 分離済みwavを直接採譜する(stem=Noneで二重分離を避ける)。
+            # drumsは非音程なので音程の正しさは保証されない(正直な注記)。
+            r = transcribe_file(
+                sep.stems[name], out_musicxml=out_xml, out_pdf=out_pdf,
+                title=f"{base} ({name})",
+            )
+            per_stem.append(
+                {"stem": name, "n_notes": r["n_notes"],
+                 "engine": r["engine"], "output": str(out_xml)}
+            )
+    finally:
+        shutil.rmtree(stem_dir, ignore_errors=True)
+
+    print(json.dumps({"input": args.input, "out_dir": str(out_dir),
+                      "model": sep.model, "stems": per_stem},
+                     ensure_ascii=False, indent=2))
     return 0
 
 
