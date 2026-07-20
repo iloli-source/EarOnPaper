@@ -1,0 +1,10 @@
+# Default owner for all changes.
+* @sivachi
+
+# Engine and quality harness are the core review surface.
+/spike/ear-pipeline/ @sivachi
+/tools/ai-ears/ @sivachi
+
+# Product requirements and research docs need explicit owner review.
+/docs/ @sivachi
+
