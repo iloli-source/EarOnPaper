@@ -67,12 +67,32 @@ def plain_tempo_svg(svg: str) -> str:
     )
 
 
+# cairosvgはフォント未指定のテキストをCJKグリフを持たないデフォルトフォントで
+# 描画し、日本語タイトルが豆腐(□)化する。ヘッダー(pgHead=曲名等)のテキストに
+# CJK対応フォントスタックを明示注入して防ぐ(macOS=Hiragino / Linux=Noto)。
+_CJK_FONT_STACK = "Hiragino Sans, Hiragino Kaku Gothic ProN, Noto Sans CJK JP, sans-serif"
+
+
+def cjk_safe_header_svg(svg: str) -> str:
+    """譜面ヘッダー(タイトル等)のテキストにCJK対応フォントを明示する。"""
+
+    def _fix_head_block(m: re.Match[str]) -> str:
+        return m.group(0).replace("<text ", f'<text font-family="{_CJK_FONT_STACK}" ')
+
+    return re.sub(
+        r'<g[^>]*class="pgHead[^"]*"[^>]*>.*?</g>',
+        _fix_head_block,
+        svg,
+        flags=re.S,
+    )
+
+
 def write_pdf(musicxml_path: str | Path, out_pdf: str | Path) -> dict:
     """MusicXML → 複数ページPDF。生成結果のメタ情報を返す。"""
     import cairosvg
     from pypdf import PdfWriter
 
-    svgs = [plain_tempo_svg(s) for s in render_svg_pages(musicxml_path)]
+    svgs = [cjk_safe_header_svg(plain_tempo_svg(s)) for s in render_svg_pages(musicxml_path)]
     writer = PdfWriter()
     for svg in svgs:
         page_pdf = cairosvg.svg2pdf(bytestring=svg.encode("utf-8"))
@@ -97,7 +117,7 @@ def write_png_preview(musicxml_path: str | Path, out_png: str | Path, page: int 
     """指定ページのPNGプレビューを生成する（確認・デモ用）。"""
     import cairosvg
 
-    svgs = [plain_tempo_svg(s) for s in render_svg_pages(musicxml_path)]
+    svgs = [cjk_safe_header_svg(plain_tempo_svg(s)) for s in render_svg_pages(musicxml_path)]
     idx = max(1, min(page, len(svgs))) - 1
     out_png = Path(out_png)
     out_png.parent.mkdir(parents=True, exist_ok=True)

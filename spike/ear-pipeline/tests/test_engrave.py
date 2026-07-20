@@ -141,3 +141,59 @@ class TestIssue49Engrave:
         write_musicxml(to_score(notes, bpm=100.0, title="One"), xml)
         eng.write_pdf(xml, tmp_path / "one.pdf")
         assert captured and all('font-family="Leipzig"' not in s for s in captured)
+
+
+class TestCJKTitle:
+    """日本語タイトルの豆腐(□)化防止（ユーザー指摘 2026-07-20）。
+
+    Verovio SVGには日本語文字が残るが、cairosvgがCJKグリフのない
+    デフォルトフォントで描画して豆腐化していた。ヘッダーにCJK対応
+    フォントスタックを注入して防ぐ。
+    """
+
+    def _jp_musicxml(self, tmp_path: Path) -> Path:
+        events = [
+            PitchEvent(onset=i * 0.5, offset=i * 0.5 + 0.45, midi=60 + i, confidence=0.9)
+            for i in range(8)
+        ]
+        notes = quantize_events(events, bpm=120.0)
+        score = to_score(notes, bpm=120.0, title="かえるのうた")
+        out = tmp_path / "jp.musicxml"
+        write_musicxml(score, out)
+        return out
+
+    def test_cjk_font_injected_into_header(self, tmp_path):
+        # Arrange
+        from earpipe.services.notate.engrave import cjk_safe_header_svg
+
+        xml = self._jp_musicxml(tmp_path)
+        svg = render_svg_pages(xml)[0]
+        assert "かえるのうた" in svg  # 前提: タイトルはSVGまで生きている
+
+        # Act
+        fixed = cjk_safe_header_svg(svg)
+
+        # Assert: pgHead内のtextにCJKフォントが明示される
+        import re
+
+        head = re.search(r'<g[^>]*class="pgHead[^"]*"[^>]*>.*?</g>', fixed, re.S)
+        assert head is not None
+        assert "Hiragino" in head.group(0)
+
+    def test_jp_title_renders_not_tofu(self, tmp_path):
+        # Arrange
+        xml = self._jp_musicxml(tmp_path)
+        out = tmp_path / "jp.pdf"
+
+        # Act
+        write_pdf(xml, out)
+
+        # Assert: 描画画像の上部にインクがある（豆腐でも黒はあるため、
+        # 併せてPDF埋め込みフォントにCJK対応フォントが含まれることを確認）
+        reader = PdfReader(str(out))
+        fonts = set()
+        page = reader.pages[0]
+        resources = page.get("/Resources", {})
+        for f in resources.get("/Font", {}).values():
+            fonts.add(str(f.get_object().get("/BaseFont", "")))
+        assert any("Hiragino" in f or "Noto" in f for f in fonts), fonts
