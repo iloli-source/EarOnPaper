@@ -12,6 +12,8 @@ from pathlib import Path
 
 from earpipe.services.ear import (
     apply_postfilter,
+    bp_python_path,
+    choose_engine,
     detect_events,
     detect_events_adaptive,
     detect_events_poly,
@@ -44,7 +46,7 @@ def transcribe_file(
     out_pdf: str | Path | None = None,
     out_tab: str | Path | None = None,
     out_tab_plain: str | Path | None = None,
-    engine: str = "mono",
+    engine: str = "auto",
     sensitivity: str = "auto",
     postfilter: bool = False,
     field_mode: bool = False,
@@ -52,7 +54,10 @@ def transcribe_file(
     title: str | None = None,
     chord_diagrams: bool = True,
 ) -> dict:
-    """音声ファイルを採譜する。engine: mono(pYIN単音) / poly(basic-pitch多声)。
+    """音声ファイルを採譜する。engine: auto(既定・#64) / mono(pYIN単音) / poly(basic-pitch多声)。
+
+    auto は音源のポリフォニーを推定して mono/poly を自動選択する(engine_select.choose_engine)。
+    混合音源(伴奏あり)はpoly、純単旋律はmonoが選ばれる。poly不能な環境ではmonoへ正直に退避。
 
     poly の感度は密度適応 sensitivity="auto" が既定(Issue #54):
     normal/high両感度で検出し、high/normal検出数比≥2.3で「normalが取りこぼす
@@ -89,8 +94,27 @@ def transcribe_file(
         y_loaded, sr_loaded = load_audio(in_path)
         analysis = analyze_field(y_loaded, sr_loaded)
 
+    # エンジン自動選択(#64): 混合音源はmono(pYIN単旋律)だとほぼ拾えず、純単旋律は
+    # poly(basic-pitch)だとオクターブ倍音を誤検出する。音源のポリフォニーを推定して
+    # 切り替える。先に安価なmono検出を回し、被覆率も判定材料にする。
+    engine_choice = None
+    resolved_engine = engine
+    mono_events_cache = None
+    if engine == "auto":
+        if y_loaded is not None:
+            y, sr = y_loaded, sr_loaded
+        else:
+            y, sr = load_audio(in_path)
+        if field_mode:
+            y = denoise(y, sr)
+        mono_events_cache = detect_events(y, sr)
+        engine_choice = choose_engine(
+            y, sr, mono_events_cache, poly_available=bp_python_path() is not None
+        )
+        resolved_engine = engine_choice.engine
+
     adaptive_report = None
-    if engine == "poly":
+    if resolved_engine == "poly":
         if sensitivity == "auto":
             selection = detect_events_adaptive(in_path)
             events = selection.events
@@ -104,6 +128,9 @@ def transcribe_file(
             events = detect_events_poly(in_path, sensitivity=sensitivity)
         if postfilter:
             events = apply_postfilter(events)
+    elif mono_events_cache is not None:
+        # auto選択でmonoに決まった場合は再検出せず流用する(二重検出回避)
+        events = mono_events_cache
     else:
         # field_mode時は分析でロード済みの波形を再利用する(二重ロード回避)
         if y_loaded is not None:
@@ -131,8 +158,10 @@ def transcribe_file(
         notes = []
         anchored_lead_beats = 0.0
 
-    # 曲名メタデータの貫通(#42): 未指定なら入力ファイル名を使う
-    score = to_score(notes, bpm, title=title or Path(in_path).stem)
+    # 曲名メタデータの貫通(#42): 未指定なら入力ファイル名を使う。
+    # in_path はトリム/補正後の一時ファイルを指すため、必ず元入力名(in_path_orig)を使う
+    # (バグ修正: 一時ファイル名 earpipe_xxxx_trimmed が譜面タイトルに漏れていた)
+    score = to_score(notes, bpm, title=title or Path(in_path_orig).stem)
     if out_musicxml:
         write_musicxml(score, out_musicxml)  # 譜面は常に格子側(楽譜=量子化表現)
     if out_midi:
@@ -152,7 +181,8 @@ def transcribe_file(
         "trimmed_leading_sec": round(trimmed_sec, 3),
         "anchored_lead_beats": round(anchored_lead_beats, 3),
         "tuning_offset_cents": round(tuning_offset, 1),
-        "engine": engine,
+        "engine": resolved_engine,
+        "engine_requested": engine,
         "n_events": len(events),
         "n_notes": len(notes),
         "bpm": bpm,
@@ -165,6 +195,15 @@ def transcribe_file(
         "timing": timing,
         "notes": notes,
     }
+    if engine_choice is not None:
+        result["engine_select"] = {
+            "engine": engine_choice.engine,
+            "polyphony": engine_choice.polyphony,
+            "mono_coverage": engine_choice.mono_coverage,
+            "poly_available": engine_choice.poly_available,
+            "fell_back": engine_choice.fell_back,
+            "reason": engine_choice.reason,
+        }
     if adaptive_report is not None:
         result["adaptive"] = adaptive_report
     if analysis is not None:
@@ -212,8 +251,9 @@ def main(argv: list[str] | None = None) -> int:
         help="フィールド録音モード(C8): SNR適応の選択的抽出+非音程成分の分類報告",
     )
     pt.add_argument(
-        "--engine", choices=("mono", "poly"), default="mono",
-        help="mono=pYIN単音(既定) / poly=basic-pitch多声",
+        "--engine", choices=("auto", "mono", "poly"), default="auto",
+        help="auto=音源のポリフォニー推定でmono/poly自動選択(既定・#64) / "
+             "mono=pYIN単音 / poly=basic-pitch多声",
     )
     pt.add_argument(
         "--sensitivity", choices=("auto", "normal", "high"), default="auto",

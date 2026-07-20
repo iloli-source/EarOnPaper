@@ -67,7 +67,7 @@ ipcMain.handle('open-external', async (_, filePath) => {
 })
 
 // 採譜実行
-ipcMain.handle('transcribe', async (event, inputPath, engine = 'mono', title = '') => {
+ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '') => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-'))
   const baseName = path.basename(inputPath, path.extname(inputPath))
   const outMusicxml = path.join(tmpDir, `${baseName}.musicxml`)
@@ -75,19 +75,21 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'mono', title = '
   const outMidi = path.join(tmpDir, `${baseName}.mid`)
 
   return new Promise((resolve, reject) => {
-    const isPoly = engine === 'poly'
+    // auto=音源に応じてmono/poly自動選択(既定・#64) / mono / poly のみ許可
+    const selected = ['auto', 'mono', 'poly'].includes(engine) ? engine : 'auto'
     const args = [
       '-W', 'ignore::RuntimeWarning',
       '-m', 'earpipe.pipeline', 'transcribe', inputPath,
       '-o', outMusicxml,
       '--pdf', outPdf,
       '--midi', outMidi,
-      '--engine', isPoly ? 'poly' : 'mono',
+      '--engine', selected,
     ]
     if (title) args.push('--title', title)
 
+    // auto は poly に解決されうるため、mono 明示指定以外は basic-pitch 用 Python を渡す
     const env = { ...process.env }
-    if (isPoly) env.EARPIPE_BP_PYTHON = PYTHON312
+    if (selected !== 'mono') env.EARPIPE_BP_PYTHON = PYTHON312
 
     console.log('[earpipe] CMD:', PYTHON, args.join(' '))
     const proc = spawn(PYTHON, args, { cwd: ENGINE_DIR, env })

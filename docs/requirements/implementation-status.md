@@ -21,7 +21,7 @@
 |---|---|---|---|---|
 | F-001 | 音声ファイル入力 | 1 | ✅ | `stem/preprocess.py:load_audio()` wav/mp3/flac/ogg/m4a |
 | F-003 | **ステム分離** | 1 | ⬜ | **未着手。Demucs等なし。混合音源が採れない主因。→ 実装対象** |
-| F-010 | 多重音高検出 | 1 | ✅ | `ear/mono.py` pYIN / `ear/poly.py` basic-pitch / `adaptive.py` |
+| F-010 | 多重音高検出 | 1 | ✅ | `ear/mono.py` pYIN / `ear/poly.py` basic-pitch / `adaptive.py` / `engine_select.py` mono/poly自動選択(#64) |
 | F-011 | オンセット/オフセット | 1 | ✅ | PitchEvent契約でonset/offset秒 |
 | F-012 | 拍・小節推定 | 1 | ✅ | `rhythm/meter.py:estimate_meter()` `estimate_grid()` |
 | F-017 | テンポマップ生成 | 1 | 🟡 | `rhythm/tempo_map.py` 分析出力のみ。記譜は単一テンポ格子 |
@@ -94,7 +94,7 @@
 
 ## 実装ロードマップ（本台帳に基づく着手順）
 
-1. **B. エンジン欠落**（実害直結）: mono/poly自動選択(#64)・F-003ステム分離・F-023声部分離・F-015楽器分類
+1. **B. エンジン欠落**（実害直結）: ~~mono/poly自動選択(#64)~~ ✅完了(2026-07-21 `engine_select.py`)・F-003ステム分離・F-023声部分離・F-015楽器分類
 2. **C. 解析/整譜**: F-002音質診断フル・F-052 XML検証・F-054プレビュー・F-024連桁整理・F-004長尺分割
 3. **D. 記譜形式**: F-033简谱・F-034リードシート
 4. **E. 編集UI/アプリ**: F-038/039/041/042/043/046

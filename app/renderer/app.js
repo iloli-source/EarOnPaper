@@ -193,7 +193,7 @@ async function startTranscribe(filePath, fileName) {
   removeProgressListener = window.earpipe.onProgress(() => {})
 
   try {
-    const result = await window.earpipe.transcribe(filePath, 'poly', title)
+    const result = await window.earpipe.transcribe(filePath, 'auto', title)
     clearStageTimers()
     if (removeProgressListener) {
       removeProgressListener()

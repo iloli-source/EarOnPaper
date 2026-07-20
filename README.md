@@ -17,7 +17,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 出力の `.musicxml` は MuseScore（無料）でそのまま開けます。
 
-> **伴奏を含む混合音源は `--engine poly` を付けてください。** 既定エンジン `mono` は単旋律（弾き語り・口笛・鼻歌）専用で、複数の音が同時に鳴るフルバンド曲ではほぼ音を拾えません（デスクトップアプリは自動で poly を使います）。エンジンの自動選択は [Issue #64](https://github.com/iloli-source/EarOnPaper/issues/64) で対応中。
+> **エンジンは既定 `auto` で音源に応じて自動選択されます（Issue #64 で実装）。** 音源のポリフォニーを推定し、伴奏を含む混合音源は `poly`（basic-pitch 多声）、弾き語り・口笛・鼻歌などの単旋律は `mono`（pYIN 単音）を選びます。ノイズは音符化しません。明示指定したい場合のみ `--engine mono|poly` を付けてください。`poly` の利用には basic-pitch 用 Python（`EARPIPE_BP_PYTHON`）が必要で、無い環境では `mono` に正直にフォールバックします。
 
 ## なぜ全部公開するのか
 

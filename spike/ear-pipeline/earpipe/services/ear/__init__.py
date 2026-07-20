@@ -3,6 +3,11 @@ from earpipe.services.ear.mono import detect_events
 from earpipe.services.ear.poly import bp_python_path, detect_events_poly
 from earpipe.services.ear.field_select import gate_by_class, select_events
 from earpipe.services.ear.postfilter import apply_postfilter
+from earpipe.services.ear.engine_select import (
+    EngineChoice,
+    choose_engine,
+    estimate_polyphony,
+)
 
 __all__ = [
     "AdaptiveSelection",
@@ -13,4 +18,7 @@ __all__ = [
     "apply_postfilter",
     "select_events",
     "gate_by_class",
+    "EngineChoice",
+    "choose_engine",
+    "estimate_polyphony",
 ]
