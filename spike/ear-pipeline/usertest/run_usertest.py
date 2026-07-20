@@ -164,6 +164,7 @@ def process_song(in_path: Path, index: int, force: bool) -> dict:
         "midi": f"output/{name}.mid",
         "engine": summary.get("engine"),
         "trimmed_leading_sec": summary.get("trimmed_leading_sec"),
+        "anchored_lead_beats": summary.get("anchored_lead_beats"),
         "bpm": summary.get("bpm"),
         "n_notes": summary.get("n_notes"),
         "n_events": summary.get("n_events"),
