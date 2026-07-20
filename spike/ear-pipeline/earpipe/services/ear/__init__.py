@@ -8,8 +8,14 @@ from earpipe.services.ear.engine_select import (
     choose_engine,
     estimate_polyphony,
 )
+from earpipe.services.ear.instrument_classify import (
+    InstrumentGuess,
+    classify_instrument,
+)
 
 __all__ = [
+    "InstrumentGuess",
+    "classify_instrument",
     "AdaptiveSelection",
     "detect_events",
     "detect_events_adaptive",

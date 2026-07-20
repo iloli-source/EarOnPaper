@@ -18,6 +18,8 @@ from earpipe.services.stem.separate import (
     demucs_python_path,
     separate_stems,
 )
+from earpipe.services.stem.diagnose import AudioQuality, diagnose_audio
+from earpipe.services.stem.chunk import Chunk, split_into_chunks
 
 __all__ = [
     "FieldAnalysis",
@@ -34,4 +36,8 @@ __all__ = [
     "demucs_available",
     "demucs_python_path",
     "separate_stems",
+    "AudioQuality",
+    "diagnose_audio",
+    "Chunk",
+    "split_into_chunks",
 ]
