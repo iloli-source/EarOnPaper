@@ -25,6 +25,8 @@ from .transpose import (
     transpose_notes,
     transpose_tab_out_of_range,
 )
+from .convert import staff_to_jianpu, staff_to_tab_frets, tab_to_staff
+from .density import DroppedNote, simplify_density, simplify_density_verbose
 
 __all__ = [
     "to_score", "write_midi", "write_midi_raw", "write_musicxml",
@@ -37,4 +39,6 @@ __all__ = [
     "write_guitarpro", "cleanse_to_scale", "to_ust", "to_vocal_midi",
     "to_llm_text",
     "transpose_notes", "transpose_key", "spell_transposed_key", "transpose_tab_out_of_range",
+    "staff_to_jianpu", "staff_to_tab_frets", "tab_to_staff",
+    "DroppedNote", "simplify_density", "simplify_density_verbose",
 ]
