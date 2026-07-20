@@ -12,10 +12,18 @@ from earpipe.services.ear.instrument_classify import (
     InstrumentGuess,
     classify_instrument,
 )
+from earpipe.services.ear.pedal import (
+    SustainSpan,
+    detect_sustain,
+    detect_sustain_audio,
+)
 
 __all__ = [
     "InstrumentGuess",
     "classify_instrument",
+    "SustainSpan",
+    "detect_sustain",
+    "detect_sustain_audio",
     "AdaptiveSelection",
     "detect_events",
     "detect_events_adaptive",

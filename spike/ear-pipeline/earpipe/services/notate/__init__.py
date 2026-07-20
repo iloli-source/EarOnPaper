@@ -15,6 +15,9 @@ from .leadsheet import to_leadsheet
 from .roman_nashville import to_nashville, to_roman
 from .movable_do import to_movable_do
 from .technique import Technique, detect_techniques
+from .guitarpro_export import write_guitarpro
+from .scale_cleanse import cleanse_to_scale
+from .vocal_synth_export import to_ust, to_vocal_midi
 
 __all__ = [
     "to_score", "write_midi", "write_midi_raw", "write_musicxml",
@@ -24,4 +27,5 @@ __all__ = [
     "render_preview", "to_jianpu", "to_leadsheet",
     "to_roman", "to_nashville", "to_movable_do",
     "Technique", "detect_techniques",
+    "write_guitarpro", "cleanse_to_scale", "to_ust", "to_vocal_midi",
 ]

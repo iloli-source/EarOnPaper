@@ -9,6 +9,8 @@ from earpipe.services.rhythm.quantize import (
     quantize_events,
 )
 from earpipe.services.rhythm.tempo_map import TempoSegment, estimate_tempo_map
+from earpipe.services.rhythm.rebar import add_sync_points, correct_beat_offset
+from earpipe.services.rhythm.midi_cleanup import RemovedNote, cleanup_notes
 
 __all__ = [
     "BPM_DEFAULT",
@@ -21,4 +23,8 @@ __all__ = [
     "estimate_tempo",
     "estimate_tempo_map",
     "quantize_events",
+    "add_sync_points",
+    "correct_beat_offset",
+    "RemovedNote",
+    "cleanup_notes",
 ]
