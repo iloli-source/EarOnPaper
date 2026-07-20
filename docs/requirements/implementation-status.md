@@ -42,30 +42,32 @@
 | F-048 | MusicXMLエクスポート | 1 | ✅ | `score.py:write_musicxml()` music21 |
 | F-049 | MIDIエクスポート | 1 | ✅ | `score.py:write_midi()` grid/raw二重 |
 | F-050 | PDF楽譜出力 | 2 | ✅ | `engrave.py:write_pdf()` |
-| F-052 | **MusicXML妥当性検証** | 1 | ⬜ | XSD検証なし。→ 実装対象 |
+| F-052 | **MusicXML妥当性検証** | 1 | ✅ | `notate/musicxml_validate.py` XSD/構造/ラウンドトリップ検証(#66) |
 | F-066 | 完全ローカル処理 | 1 | ✅ | 外部送信コードなし |
 | F-068 | 日本語UI | 2 | ✅ | app全体が日本語 |
 | F-071 | 無料試用 | 2 | 🚫 | 課金/配布の業務項目（コード外） |
 | F-076 | 弦・フレット割当エンジン | 1 | ✅ | `tab.py` |
 | F-077 | チューニング・カポ指定 | 1 | 🟡 | 基準ピッチ補正`tuning.py`済。カポ/staff-tuning印字は限定 |
-| F-078 | ギター/ベース奏法検出 | 2 | 🟡 | 奏法タグ検出は未（PitchEvent契約に無し） |
+| F-078 | ギター/ベース奏法検出 | 2 | ✅ | `notate/technique.py` bend/slide/vibrato/hammer/pull(#73) |
 | F-081 | 調整合ピッチスペリング | 1 | ✅ | `notate/spelling.py:spell_midi()` KS法 |
 | F-108 | フィールド録音モード | 1 | ✅ | `stem/field*.py` 分類タグ+選択抽出 |
-| F-002 | 音質診断・警告 | 2(Should) | 🟡 | `stem/field.py` SNRのみ。クリッピング/残響/帯域は未 |
+| F-002 | 音質診断・警告 | 2(Should) | ✅ | `stem/diagnose.py` クリッピング/SNR/残響/帯域/3段階rating(#67) |
 
 ## 機能要件 Should/Could の主な未着手（抜粋）
 
 | ID | 名称 | Phase | 状況 | 備考 |
 |---|---|---|---|---|
-| F-004 | 長尺音源の自動分割 | 2 | ⬜ | チャンク処理なし。NF-006(2h保証)の土台 |
+| F-004 | 長尺音源の自動分割 | 2 | ✅ | `stem/chunk.py:split_into_chunks()` 無音境界優先(#68) |
 | F-005 | マイク/ライン録音入力 | 2 | ⬜ | ファイル入力のみ |
 | F-013 | キー/スケール推定 | 2 | ✅ | `spelling.py:estimate_key()` |
 | F-014 | コード進行解析 | 2 | ✅ | `notate/chord.py:estimate_chords()` |
-| F-015 | 楽器分類・パート識別 | 2 | ⬜ | 分類タグ定義のみ、識別エンジンなし |
-| F-033 | 简谱(数字譜) | 3 | ⬜ | 記譜プロファイル未 |
-| F-034 | コード譜・リードシート | 2 | ⬜ | chord.pyはあるが専用出力なし |
+| F-015 | 楽器分類・パート識別 | 2 | ✅ | `ear/instrument_classify.py` 実データ較正・粗判定(#72) |
+| F-033 | 简谱(数字譜) | 3 | ✅ | `notate/jianpu.py:to_jianpu()`(#70) |
+| F-034 | コード譜・リードシート | 2 | ✅ | `notate/leadsheet.py:to_leadsheet()`(#71) |
 | F-041 | スペクトログラム表示 | 2 | ⬜ | UI未 |
-| F-054 | 音声プレビュー出力 | 2 | 🟡 | ai-earsにMIDI合成あり。MP3書き出しUIは未 |
+| F-054 | 音声プレビュー出力 | 2 | ✅ | `notate/preview.py:render_preview()` MIDI→WAV/MP3(#69) |
+| F-091 | 度数/ローマ数字/Nashville | 3 | ✅ | `notate/roman_nashville.py`(#74) |
+| F-100 | 移動ド記譜 | 3 | ✅ | `notate/movable_do.py:to_movable_do()`(#75) |
 | F-059〜F-065 | 練習支援群 | 2-3 | ⬜ | テンポ変更/移調/ループ/学習モード等 |
 
 ## 非機能要件 Must（20件）
