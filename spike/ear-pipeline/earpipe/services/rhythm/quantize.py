@@ -300,3 +300,27 @@ def quantize_events(
             )
         )
     return clipped
+
+
+def anchor_to_zero(
+    notes: list[QuantizedNote],
+) -> tuple[list[QuantizedNote], float]:
+    """楽譜の最初の音符が0拍目から始まるよう格子側だけ全体シフトする。
+
+    フェードイン等で先頭無音トリム(top_db方式)が届かない残り無音は、
+    量子化後にそのまま先頭休符になる(ユーザー指摘 2026-07-20)。楽譜は
+    最初の音符から始めるのが自然なため start_beats を一律にずらす。
+    実タイミング(onset_sec/offset_sec)はC3二重表現の原則どおり保持する。
+    戻り値: (シフト済み音符列, シフトした拍数)。
+    """
+    from dataclasses import replace
+
+    if not notes:
+        return [], 0.0
+    lead = min(n.start_beats for n in notes)
+    if lead <= 0.0:
+        return list(notes), 0.0
+    return (
+        [replace(n, start_beats=n.start_beats - lead) for n in notes],
+        lead,
+    )

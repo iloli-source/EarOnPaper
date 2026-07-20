@@ -29,6 +29,7 @@ from earpipe.services.notate import (
 from earpipe.services.rhythm import (
     BPM_DEFAULT,
     GRID_PER_BEAT,
+    anchor_to_zero,
     estimate_grid,
     estimate_tempo_map,
     quantize_events,
@@ -121,10 +122,14 @@ def transcribe_file(
         notes = quantize_events(
             events, bpm, mono=(engine == "mono"), grid_per_beat=grid_per_beat
         )
+        # 記譜アンカー: フェードイン等でトリムが届かない残り無音が先頭休符に
+        # ならないよう、最初の音符を0拍目に揃える(格子側のみ。実タイミング保持)
+        notes, anchored_lead_beats = anchor_to_zero(notes)
     else:
         bpm = BPM_DEFAULT
         grid_per_beat = GRID_PER_BEAT
         notes = []
+        anchored_lead_beats = 0.0
 
     # 曲名メタデータの貫通(#42): 未指定なら入力ファイル名を使う
     score = to_score(notes, bpm, title=title or Path(in_path).stem)
@@ -145,6 +150,7 @@ def transcribe_file(
     result = {
         "input": str(in_path_orig),
         "trimmed_leading_sec": round(trimmed_sec, 3),
+        "anchored_lead_beats": round(anchored_lead_beats, 3),
         "tuning_offset_cents": round(tuning_offset, 1),
         "engine": engine,
         "n_events": len(events),

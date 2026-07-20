@@ -77,3 +77,46 @@ class TestTrimLeadingSilenceFile:
         # 無音がなければ入力パスをそのまま返す（一時ファイルを作らない）
         assert cut_sec < 0.1
         assert Path(out_path) == src
+
+
+class TestAnchorToZero:
+    """記譜アンカー: 楽譜の最初の音符を0拍目に揃える（ユーザー指摘 2026-07-20）。
+
+    フェードイン等で音量ベースのトリムが届かない残り無音は、量子化後に
+    そのまま先頭休符になる。楽譜表現は最初の音符から始めるのが自然なため、
+    格子側(start_beats)だけ全体シフトする。実タイミング(onset_sec)は保持。
+    """
+
+    def test_leading_rest_removed(self):
+        # Arrange
+        from earpipe.contracts import QuantizedNote
+        from earpipe.services.rhythm import anchor_to_zero
+
+        notes = [
+            QuantizedNote(0.5, 1.0, 60, 0.9, onset_sec=0.25),
+            QuantizedNote(1.5, 0.5, 62, 0.9, onset_sec=0.75),
+        ]
+
+        # Act
+        shifted, lead = anchor_to_zero(notes)
+
+        # Assert: 先頭が0拍、間隔は維持、実タイミングは不変
+        assert lead == 0.5
+        assert shifted[0].start_beats == 0.0
+        assert shifted[1].start_beats == 1.0
+        assert shifted[0].onset_sec == 0.25
+
+    def test_already_anchored_unchanged(self):
+        from earpipe.contracts import QuantizedNote
+        from earpipe.services.rhythm import anchor_to_zero
+
+        notes = [QuantizedNote(0.0, 1.0, 60, 0.9)]
+        shifted, lead = anchor_to_zero(notes)
+        assert lead == 0.0
+        assert shifted[0].start_beats == 0.0
+
+    def test_empty_safe(self):
+        from earpipe.services.rhythm import anchor_to_zero
+
+        shifted, lead = anchor_to_zero([])
+        assert shifted == [] and lead == 0.0
