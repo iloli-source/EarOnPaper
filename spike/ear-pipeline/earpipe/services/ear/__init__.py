@@ -17,6 +17,12 @@ from earpipe.services.ear.pedal import (
     detect_sustain,
     detect_sustain_audio,
 )
+from earpipe.services.ear.velocity import (
+    DYNAMIC_MARKS,
+    estimate_velocities,
+    to_dynamic_marks,
+)
+from earpipe.services.ear.drums import detect_drums
 
 __all__ = [
     "InstrumentGuess",
@@ -24,6 +30,10 @@ __all__ = [
     "SustainSpan",
     "detect_sustain",
     "detect_sustain_audio",
+    "DYNAMIC_MARKS",
+    "estimate_velocities",
+    "to_dynamic_marks",
+    "detect_drums",
     "AdaptiveSelection",
     "detect_events",
     "detect_events_adaptive",

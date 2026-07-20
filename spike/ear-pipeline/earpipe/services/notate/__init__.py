@@ -18,6 +18,13 @@ from .technique import Technique, detect_techniques
 from .guitarpro_export import write_guitarpro
 from .scale_cleanse import cleanse_to_scale
 from .vocal_synth_export import to_ust, to_vocal_midi
+from .llm_export import to_llm_text
+from .transpose import (
+    spell_transposed_key,
+    transpose_key,
+    transpose_notes,
+    transpose_tab_out_of_range,
+)
 
 __all__ = [
     "to_score", "write_midi", "write_midi_raw", "write_musicxml",
@@ -28,4 +35,6 @@ __all__ = [
     "to_roman", "to_nashville", "to_movable_do",
     "Technique", "detect_techniques",
     "write_guitarpro", "cleanse_to_scale", "to_ust", "to_vocal_midi",
+    "to_llm_text",
+    "transpose_notes", "transpose_key", "spell_transposed_key", "transpose_tab_out_of_range",
 ]
