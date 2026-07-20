@@ -10,3 +10,7 @@ tools/ai-ears/tests/__pycache__/
 docs/**/.*.log
 spike/ear-pipeline/usertest/input/
 spike/ear-pipeline/usertest/output/
+spike/ear-pipeline/usertest/renders/
+spike/ear-pipeline/usertest/manifest.js
+spike/ear-pipeline/usertest/status.js
+tools/ai-ears/.coverage

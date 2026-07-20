@@ -1,6 +1,6 @@
 # earpipe — Pitchsieve 採譜エンジン
 
-音声ファイル → 五線譜 MusicXML（＋MIDI）を**完全ローカル**で処理するパイプライン。
+音声ファイル → 五線譜 MusicXML（＋MIDI／PDF／ギターTAB譜 PDF）を**完全ローカル**で処理するパイプライン。
 "絶対音感エミュレータ" のコア実装。ライセンス: Apache-2.0。
 
 ---
@@ -61,6 +61,11 @@ export EARPIPE_BP_PYTHON=/path/to/python3.12
     --engine poly \
     --field-mode \
     -o 楽譜.musicxml
+
+# ギターTAB譜 PDF（コードネーム＋押さえ図つき）
+.venv/bin/python -m earpipe.pipeline transcribe 音源.wav \
+    -o 楽譜.musicxml \
+    --tab 楽譜_tab.pdf
 ```
 
 > **対応入力形式:** wav / mp3 / flac など librosa が読める形式
@@ -71,7 +76,22 @@ export EARPIPE_BP_PYTHON=/path/to/python3.12
 |---|---|
 | `.musicxml` | 五線譜（MuseScore / Finale / Sibelius 等で直接開ける） |
 | `.mid` | MIDI（DAW に取り込み可） |
-| 標準出力 JSON | イベント数・音符数・推定 BPM・チューニングずれ・区間テンポ等 |
+| `--pdf` | 五線譜 PDF（Verovio 浄書） |
+| `--tab` | ギターTAB譜 PDF（6弦標準EADGBE・コード帯つき。下記参照） |
+| 標準出力 JSON | イベント数・音符数・推定 BPM・先頭無音カット秒・チューニングずれ・区間テンポ等 |
+
+#### 前処理: 先頭無音の自動トリム
+
+音源の頭の無音（曲前の空白）は楽譜の先頭を休符にして精度を落とすため、
+**最初に音が鳴る位置まで自動で詰めてから採譜します**（ユーザー実測で精度向上を確認・2026-07-20）。
+カットした秒数は JSON の `trimmed_leading_sec` で報告します。音の頭を削らないよう 0.05 秒のマージンを残します。
+
+#### ギターTAB譜（出力プロファイル・NF-045）
+
+- **運指割り当て**: ポジション（4フレット幅＋開放弦）単位の動的計画法で**手の移動が最小**になる弦・フレットを選ぶ（ローコード偏重を回避）
+- **音域外の音**: オクターブ折り返しで収め、折り返した音数を正直に報告（`n_octave_shifted`）
+- **コード帯**: クロマ・テンプレート相関でコードを推定し、変化点にコードネーム＋押さえ図を表示。確信度が閾値未満の区間は誤魔化さず **N.C.** と表示
+- `--tab-plain` で押さえ図なし版（コードネームのみ）を同時生成、`--no-chord-diagrams` で図を無効化
 
 ---
 
@@ -83,6 +103,9 @@ transcribe 音源 [オプション]
   -o, --output FILE      MusicXML 出力先（省略時: 入力名.musicxml）
   --midi FILE            MIDI 出力先（任意）
   --pdf FILE             五線譜 PDF 出力先（-o と同時に指定）
+  --tab FILE             ギターTAB譜 PDF 出力先（6弦標準EADGBE・コード帯つき）
+  --tab-plain FILE       押さえ図なしTAB（コードネームのみ）の出力先
+  --no-chord-diagrams    TABのコード帯を押さえ図なしにする（既定は図あり）
   --engine mono|poly     mono=pYIN 単旋律（既定）/ poly=Basic Pitch 多声
   --sensitivity auto|normal|high
                          poly 検出感度（auto=密度適応・既定、high=弱音拾う）
@@ -115,8 +138,11 @@ transcribe 音源 [オプション]
 ### 6. テスト
 
 ```bash
-# エンジン全テスト（307 件）
+# エンジン全テスト（353 件）
 .venv/bin/python -m pytest tests/ -q
+
+# 並列実行（pytest-xdist）
+.venv/bin/python -m pytest tests/ -n 20 -q
 
 # カバレッジつき
 .venv/bin/python -m pytest tests/ --cov=earpipe --cov-report=term-missing
@@ -157,6 +183,7 @@ spike/ear-pipeline/
 │   ├── contracts.py         # 契約 IF（PitchEvent / QuantizedNote 等）
 │   └── services/
 │       ├── stem/            # 前処理・フィールド分類
+│       │   └── preprocess.py # ロード・先頭無音トリム
 │       ├── ear/             # 音高検出（mono=pYIN / poly=Basic Pitch）
 │       │   ├── tuning.py    # 基準ピッチ補正（A=440±50cents）
 │       │   └── adaptive.py  # 密度適応の自動感度選択
@@ -164,12 +191,16 @@ spike/ear-pipeline/
 │       │   ├── quantize.py  # 格子量子化・estimate_grid
 │       │   ├── tempo_map.py # 区間別テンポ系列
 │       │   └── meter.py     # 拍子推定（アクセント周期）
-│       └── notate/          # 五線譜 MusicXML / MIDI 出力
+│       └── notate/          # 記譜・出力プロファイル（NF-045）
 │           ├── score.py     # music21 Score 構築
 │           ├── spelling.py  # キー推定・異名同音スペリング
-│           └── engrave.py   # Verovio → PDF
-├── tests/                   # pytest（307 件）
+│           ├── engrave.py   # Verovio → 五線譜 PDF
+│           ├── tab.py       # ギターTAB譜 PDF（運指DP・重なり検査）
+│           ├── chord.py     # コード推定（クロマ・テンプレート相関）
+│           └── chord_shapes.py # コード押さえ図（開放形＋バレー計算）
+├── tests/                   # pytest（353 件）
 ├── bench/                   # PD 正解付きベンチ
+├── usertest/                # 体験テスト（採譜→聴き比べビューア。音源は非公開）
 └── requirements.txt
 ```
 

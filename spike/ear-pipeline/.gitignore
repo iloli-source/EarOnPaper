@@ -9,3 +9,4 @@ htmlcov/
 *.musicxml
 !tests/fixtures/*.musicxml
 bench/bench_out/
+.venv312/
