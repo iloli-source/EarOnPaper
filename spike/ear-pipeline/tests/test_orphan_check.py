@@ -59,9 +59,11 @@ def test_known_unwired_features_are_detected_as_orphans():
     """export 済みだが今も pipeline 未配線の機能は孤立として検出される。"""
     # Arrange / Act
     orphans, _ = orphan.find_orphans()
-    # Assert: まだ結線されていない孤立機能の代表(B-2 エミッタ生成の対象)
-    for sym in ["transpose_notes", "write_guitarpro", "detect_drums", "assign_fingering"]:
-        assert sym in orphans, f"{sym} は孤立のはず(未配線・B-2対象)"
+    # Assert: 意図的に未結線のまま凍結中の代表(subcommand型3件 + #113のgp5)。
+    # diff_notes=2譜面必須 / run_compare=外部ツール / split_into_chunks=音声分割 /
+    # write_guitarpro=producer欠陥(#113)。これらは emitter 単一副次出力に収まらない。
+    for sym in ["diff_notes", "run_compare", "split_into_chunks", "write_guitarpro"]:
+        assert sym in orphans, f"{sym} は孤立のはず(意図的に未結線・allowlist凍結)"
 
 
 def test_baseline_passes_with_allowlist():
