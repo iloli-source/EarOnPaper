@@ -1,11 +1,15 @@
-"""technique エミッタのスモーク: 音声→奏法検出レポートを非空で出す。
+"""technique エミッタのテスト(F-078 結線検証)。
 
-detect_techniques(耳層)への結線を検証する。合成純音では奏法が検出されない
-ことも正常(module の正直な限界)。ここでは「例外なく非空レポートを書く」ことと
-モジュール契約(KEY/EXT/NEEDS_*)を保証する。
+「非空レポートが出る/technique_count: が在る」だけでは検出0でも通ってしまう(偽成功)。
+そこで **ビブラート音**(周波数を±40centで5.5Hz揺らした合成音)を与え、実際に奏法が
+1件以上検出され kind=vibrato が報告されることを検証する。奏法検出は原理的に曖昧だが、
+明確なビブラート gesture は決定的に拾えることを利用する。
 """
 
 from __future__ import annotations
+
+import numpy as np
+import soundfile as sf
 
 from earpipe.contracts import QuantizedNote
 from earpipe.services.emitters.base import EmitContext
@@ -18,50 +22,40 @@ from earpipe.services.emitters.technique import (
 )
 
 
-def _notes() -> list[QuantizedNote]:
-    """simple_wav(BPM120)の先頭数音に対応する最小ノート。"""
-    specs = [
-        (60, 0.0, 1.0),
-        (62, 1.0, 1.0),
-        (64, 2.0, 0.5),
-    ]
-    return [
-        QuantizedNote(
-            start_beats=s,
-            dur_beats=d,
-            midi=m,
-            confidence=0.9,
-        )
-        for m, s, d in specs
-    ]
+def _vibrato_wav(path, sr=22050, dur=1.5, base_hz=440.0, depth_cents=40.0, rate_hz=5.5):
+    """base_hz を ±depth_cents で rate_hz 揺らしたビブラート音を書き出す。"""
+    t = np.linspace(0, dur, int(sr * dur), endpoint=False)
+    cents = depth_cents * np.sin(2 * np.pi * rate_hz * t)
+    freq = base_hz * 2 ** (cents / 1200.0)
+    phase = 2 * np.pi * np.cumsum(freq) / sr
+    sf.write(str(path), (0.4 * np.sin(phase)).astype("float32"), sr)
+    return path
 
 
 def test_module_contract():
-    # Arrange / Act / Assert
     assert KEY == "technique"
     assert EXT == "txt"
     assert NEEDS_AUDIO is True
     assert NEEDS_MUSICXML is False
 
 
-def test_emit_writes_non_empty_report(simple_wav, tmp_path):
-    # Arrange
-    wav_path, _melody, bpm = simple_wav
+def test_emit_detects_vibrato(tmp_path):
+    # Arrange: 明確なビブラート音(検出0では落ちる)
+    wav = _vibrato_wav(tmp_path / "vib.wav")
     ctx = EmitContext(
-        notes=_notes(),
-        bpm=float(bpm),
+        notes=[QuantizedNote(start_beats=0.0, dur_beats=1.0, midi=69, confidence=0.9)],
+        bpm=120.0,
         title="test",
-        audio_path=wav_path,
+        audio_path=wav,
     )
     out_path = tmp_path / "technique.txt"
 
     # Act
-    result = emit(ctx, out_path)
+    emit(ctx, out_path)
 
-    # Assert
-    assert result == out_path
-    assert out_path.exists()
-    text = out_path.read_text(encoding="utf-8")
-    assert len(text) > 0
-    assert "technique_count:" in text
-    assert "# 奏法検出レポート (F-078)" in text
+    # Assert: 奏法が実際に1件以上検出され、vibrato が報告されている
+    lines = out_path.read_text(encoding="utf-8").splitlines()
+    count = int(next(l for l in lines if l.startswith("technique_count:")).split(":")[1])
+    assert count >= 1, f"ビブラート音なのに奏法が検出されていない(偽成功): \n{lines}"
+    kinds = {l.split("\t")[1] for l in lines if "\t" in l and l.split("\t")[0].isdigit()}
+    assert "vibrato" in kinds, f"vibrato が検出されていない: {kinds}"

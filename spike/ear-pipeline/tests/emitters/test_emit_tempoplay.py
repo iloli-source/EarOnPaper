@@ -49,10 +49,12 @@ def test_slow_output_is_longer_than_source(simple_wav, tmp_path):
     # Act
     tempoplay.emit(ctx, out_path)
 
-    # Assert: 半速なら概ね元より長い(ピッチ維持タイムストレッチの効果)
+    # Assert: 半速(rate=0.5)なら再生長は概ね 1/rate=2倍。単に「長い」でなく比率で固定する
+    # (time_stretch が実際に指定レートで伸ばしたことを検証。±20%の許容)。
     out, out_sr = sf.read(str(out_path))
     assert out_sr == sr
-    assert out.shape[0] > src.shape[0]
+    ratio = out.shape[0] / src.shape[0]
+    assert 1.6 <= ratio <= 2.4, f"タイムストレッチ比が想定外: {ratio:.2f} (rate=0.5 なら ~2.0)"
 
 
 def test_loop_region_path_emits_nonempty(simple_wav, tmp_path):
