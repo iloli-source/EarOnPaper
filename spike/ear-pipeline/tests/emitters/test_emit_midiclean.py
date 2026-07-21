@@ -42,10 +42,14 @@ def test_emit_writes_nonempty_report(tmp_path) -> None:
     assert result == out_path
     assert out_path.exists()
     text = out_path.read_text(encoding="utf-8")
-    assert text.strip() != ""
+    # 完全重複が正しく1件だけ統合される(数まで検証。キーワード存在では不十分)
     assert "input_count: 3" in text
-    # 完全重複が1件統合され RemovedNote が可視化されている
-    assert "exact_duplicate" in text
+    assert "output_count: 2" in text
+    assert "removed_count: 1" in text
+    assert "exact_duplicate: 1" in text
+    # 除去されたのは重複した midi=60 であること
+    removed_line = next(l for l in text.splitlines() if "[exact_duplicate]" in l)
+    assert "midi=60" in removed_line
 
 
 def test_emit_empty_notes(tmp_path) -> None:

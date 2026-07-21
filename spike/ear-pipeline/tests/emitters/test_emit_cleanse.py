@@ -29,14 +29,13 @@ def test_emit_writes_non_empty_report(tmp_path):
     # Act
     result = cleanse.emit(ctx, out_path)
 
-    # Assert
+    # Assert: 調外音がちょうど1件検出され、その C#(61) が調内音へスナップされる(中身まで検証)
     assert result == out_path
-    assert out_path.exists()
     text = out_path.read_text(encoding="utf-8")
-    assert len(text) > 0
-    assert "F-086" in text
-    # 調外音が1つは候補に載る(midi 61 の C# は調外)
-    assert "out_of_scale" in text
+    assert "out_of_scale: 1" in text, "調外音の検出数が想定と違う"
+    # C#(61) の補正候補行があり、最近傍の調内音(60 or 62)へスナップされている
+    cand = next(l for l in text.splitlines() if l.startswith("[") and "midi 61" in l)
+    assert "-> 60" in cand or "-> 62" in cand, f"C# のスナップ先が調内音でない: {cand}"
 
 
 def test_emit_apply_true_records_applied(tmp_path):
