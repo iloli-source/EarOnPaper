@@ -42,12 +42,25 @@ def test_dispatch_wired_formats_are_not_orphans():
         assert sym not in orphans, f"{sym} は #109 で結線済みのはず"
 
 
+def test_emitter_wired_symbols_are_not_orphans():
+    """#109 B-2 汎用エミッタ(emitters/*.py)経由で結線した機能は孤立でない。
+
+    ゲートは emitters/*.py を BFS 起点に加えるため、エミッタが import する producer は
+    自動的に配線判定になる(手編集レジストリ不要)。この回帰を固定する。
+    """
+    # Arrange / Act
+    orphans, _ = orphan.find_orphans()
+    # Assert: validate エミッタ→musicxml_validate / simplify エミッタ→density
+    for sym in ["validate_musicxml", "simplify_density"]:
+        assert sym not in orphans, f"{sym} は #109 B-2 エミッタで結線済みのはず"
+
+
 def test_known_unwired_features_are_detected_as_orphans():
     """export 済みだが今も pipeline 未配線の機能は孤立として検出される。"""
     # Arrange / Act
     orphans, _ = orphan.find_orphans()
-    # Assert: まだ結線されていない孤立機能の代表(B-2c/d/e 以降の対象)
-    for sym in ["simplify_density", "write_guitarpro", "detect_drums", "assign_fingering"]:
+    # Assert: まだ結線されていない孤立機能の代表(B-2 エミッタ生成の対象)
+    for sym in ["transpose_notes", "write_guitarpro", "detect_drums", "assign_fingering"]:
         assert sym in orphans, f"{sym} は孤立のはず(未配線・B-2対象)"
 
 

@@ -13,7 +13,6 @@ AudioQuality
 CardLayout
 Chunk
 DYNAMIC_MARKS
-DroppedNote
 FitResult
 GENAI_PRESET
 GenaiPreset
@@ -25,7 +24,6 @@ PROFILES
 RemovedNote
 SustainSpan
 Technique
-ValidationReport
 add_sync_points
 adjust_musicxml_for
 align_lyrics
@@ -67,8 +65,6 @@ render_soundfont_preview
 render_visual_card
 run_compare
 separate_voices
-simplify_density
-simplify_density_verbose
 spell_transposed_key
 split_into_chunks
 staff_to_jianpu
@@ -79,5 +75,4 @@ to_dynamic_marks
 transpose_key
 transpose_notes
 transpose_tab_out_of_range
-validate_musicxml
 write_guitarpro

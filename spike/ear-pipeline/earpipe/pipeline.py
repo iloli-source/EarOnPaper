@@ -8,7 +8,7 @@ import argparse
 import json
 import shutil
 import tempfile
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 
@@ -29,6 +29,12 @@ from earpipe.services.notate import (
     write_musicxml,
     write_pdf,
     write_tab_pdf,
+)
+from earpipe.services.emitters import (
+    EmitContext,
+    default_emit_path,
+    emit as run_emit,
+    emitter_keys,
 )
 from earpipe.services.notate.analysis_dispatch import (
     AnalysisContext,
@@ -76,6 +82,7 @@ def transcribe_file(
     stem: str | None = None,
     formats: list[tuple[str, str]] | None = None,
     analyses: list[tuple[str, str]] | None = None,
+    emits: list[tuple[str, str, dict]] | None = None,
 ) -> dict:
     """音声ファイルを採譜する。engine: auto(既定・#64) / mono(pYIN単音) / poly(basic-pitch多声)。
 
@@ -304,6 +311,23 @@ def transcribe_file(
             analysis_outputs.append({"key": key, "path": str(path)})
         result["analyses"] = analysis_outputs
 
+    # 汎用エミッタ(#109 B-2): 孤立実装済み機能をオプトインで副次出力する。
+    # 既定の五線譜/MIDI/PDF/TAB 出力は変えない(既存挙動不変)。
+    if emits:
+        ectx = EmitContext(
+            notes=notes,
+            bpm=bpm,
+            title=effective_title,
+            musicxml_path=Path(out_musicxml) if out_musicxml else None,
+            audio_path=Path(in_path),
+        )
+        emit_outputs = []
+        for key, emit_out, params in emits:
+            ctx_with_params = replace(ectx, params=params)
+            path = run_emit(key, ctx_with_params, emit_out)
+            emit_outputs.append({"key": key, "path": str(path)})
+        result["emits"] = emit_outputs
+
     return result
 
 
@@ -340,6 +364,33 @@ def _parse_analysis_specs(
         key = key.strip()
         out_path = path.strip() if sep else default_analysis_path(key, input_path)
         parsed.append((key, out_path))
+    return parsed
+
+
+def _parse_emit_specs(
+    specs: list[str] | None, input_path: str
+) -> list[tuple[str, str, dict]] | None:
+    """``["simplify=out.xml#level=0.7", "validate"]`` を ``[(key, path, params), ...]`` に解決。
+
+    文法: ``KEY[=PATH][#k=v,k=v]``。PATH 省略時は '入力名.KEY.拡張子'、
+    ``#`` 以降はエミッタ固有パラメータ(カンマ区切りの k=v)。
+    """
+    if not specs:
+        return None
+    parsed: list[tuple[str, str, dict]] = []
+    for spec in specs:
+        head, sep_p, param_str = spec.partition("#")
+        params: dict[str, str] = {}
+        if sep_p:
+            for kv in param_str.split(","):
+                if not kv.strip():
+                    continue
+                pk, _, pv = kv.partition("=")
+                params[pk.strip()] = pv.strip()
+        key, sep, path = head.partition("=")
+        key = key.strip()
+        out_path = path.strip() if sep else default_emit_path(key, input_path)
+        parsed.append((key, out_path, params))
     return parsed
 
 
@@ -397,6 +448,12 @@ def main(argv: list[str] | None = None) -> int:
         help="解析テキスト出力(F-091/F-100・複数指定可)。例: --analysis movable_do。"
              "PATH省略時は '入力名.KEY.txt'。対応: movable_do/roman/nashville",
     )
+    pt.add_argument(
+        "--emit", dest="emits", action="append", metavar="KEY[=PATH][#k=v]", default=None,
+        help="孤立実装済み機能のオプトイン副次出力(#109 B-2・複数指定可)。"
+             "例: --emit validate / --emit simplify#level=0.7。既定の記譜出力は不変。"
+             f"対応: {'/'.join(emitter_keys())}",
+    )
 
     # 楽器毎に分けて譜面化(F-003): 1回の分離で旋律ステム各々を別々の譜面にする
     ps = sub.add_parser("separate-transcribe", help="ステム分離して楽器毎に別々の譜面を生成")
@@ -416,6 +473,7 @@ def main(argv: list[str] | None = None) -> int:
     out = args.output or str(Path(args.input).with_suffix(".musicxml"))
     formats = _parse_format_specs(args.formats, args.input)
     analyses = _parse_analysis_specs(args.analyses, args.input)
+    emits = _parse_emit_specs(args.emits, args.input)
     result = transcribe_file(
         args.input,
         out_musicxml=out,
@@ -433,6 +491,7 @@ def main(argv: list[str] | None = None) -> int:
         stem=args.stem,
         formats=formats,
         analyses=analyses,
+        emits=emits,
     )
     summary = {k: v for k, v in result.items() if k != "notes"}
     summary["output"] = out

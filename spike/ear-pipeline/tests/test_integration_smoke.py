@@ -116,3 +116,31 @@ def test_transcribe_analysis_outputs_are_generated(simple_wav, tmp_path):
         out = tmp_path / f"{k}.txt"
         assert out.is_file(), f"{k} が生成されていない"
         assert out.stat().st_size > 0, f"{k} が空"
+
+
+def test_transcribe_emit_outputs_are_generated(simple_wav, tmp_path):
+    """--emit 経由の汎用エミッタ(#109 B-2)が e2e で副次成果物を実生成する。
+
+    孤立実装の結線を CLI から固定する。新エミッタを追加したら key を足すこと。
+    既定の -o 出力は不変(オプトイン)であることも併せて確認。
+    """
+    # Arrange: validate は musicxml を要するため -o も渡す
+    wav_path, _melody, _bpm = simple_wav
+    out_xml = tmp_path / "e.musicxml"
+    emit_validate = tmp_path / "report.txt"
+    emit_simplify = tmp_path / "simple.musicxml"
+
+    # Act
+    rc = pipeline.main(
+        [
+            "transcribe", str(wav_path), "-o", str(out_xml), "--engine", "mono",
+            "--emit", f"validate={emit_validate}",
+            "--emit", f"simplify={emit_simplify}#level=0.6",
+        ]
+    )
+
+    # Assert: 両エミッタが通常ファイルで非空
+    assert rc == 0
+    for out in (emit_validate, emit_simplify):
+        assert out.is_file(), f"{out.name} が生成されていない"
+        assert out.stat().st_size > 0, f"{out.name} が空"

@@ -30,6 +30,10 @@ PKG = ROOT / "earpipe"
 ENTRY = PKG / "pipeline.py"
 ALLOWLIST = Path(__file__).resolve().parent / "orphan_allowlist.txt"
 BARRELS = sorted((PKG / "services").glob("*/__init__.py"))
+# エミッタ(#109 B-2)は registry が実行時に emitters/*.py を全て動的 import するため、
+# 静的 import グラフには現れないが実採譜フローから到達可能。各ファイルを BFS の起点に
+# 加えて実際の到達性を正しくモデル化する(新規エミッタは手編集なしで自動的に配線判定)。
+EMITTERS = sorted((PKG / "services" / "emitters").glob("*.py"))
 
 
 def _module_to_file(mod: str) -> Path | None:
@@ -97,7 +101,7 @@ def compute_reachable() -> tuple[set[str], set[Path]]:
 
     used: set[str] = set()
     seen_files: set[Path] = set()
-    queue: list[Path] = [ENTRY]
+    queue: list[Path] = [ENTRY, *EMITTERS]  # emitters は registry が実行時に全 import
 
     while queue:
         f = queue.pop()
