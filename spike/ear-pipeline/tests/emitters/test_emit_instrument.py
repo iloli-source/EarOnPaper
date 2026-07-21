@@ -25,13 +25,18 @@ def test_emit_writes_nonempty_instrument_report(simple_wav, tmp_path):
     # Act
     returned = instrument.emit(ctx, out_path)
 
-    # Assert
+    # Assert: label は既知6値のいずれか、confidence は 0-1、特徴が実際に計算されている
     assert returned == out_path
-    assert out_path.exists()
     text = out_path.read_text(encoding="utf-8")
-    assert text.strip() != ""
-    assert "label:" in text
-    assert "confidence:" in text
+    label = next(l for l in text.splitlines() if l.startswith("label:")).split(":", 1)[1].strip()
+    assert label in {
+        "vocal_like", "guitar_string_like", "bass_like",
+        "percussive", "keyboard_like", "unknown",
+    }, f"未知の label: {label}"
+    conf = float(next(l for l in text.splitlines() if l.startswith("confidence:")).split(":", 1)[1])
+    assert 0.0 <= conf <= 1.0
+    feat_header = next(l for l in text.splitlines() if l.startswith("features ("))
+    assert not feat_header.startswith("features (0)"), "特徴が空=分類が実質走っていない"
 
 
 def test_emit_seconds_param_truncates(simple_wav, tmp_path):
