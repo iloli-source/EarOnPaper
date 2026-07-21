@@ -89,6 +89,20 @@ def midi_notes(path: Path) -> list:
     return clip_midi(pm, CLIP_SEC)
 
 
+def _align(notes: list, shift: float) -> list:
+    """採譜結果を GT の時間軸へ整列する(先頭無音トリム分だけ前へ戻す)。
+
+    エンジンは可読性のため先頭無音を正しくトリムする(`trimmed_leading_sec`)。GT は
+    無音込みなので、採点前に採譜側を +trim だけ戻さないと、一定の全体オフセットで
+    F1@100ms が壊滅する(kojo_no_tsuki: 0.05→0.70)。相対タイミングは保たれるので、
+    この整列は「測定を正しくする」是正であって数字の細工ではない
+    (docs/research/accuracy-improvement-roadmap.md)。
+    """
+    if not shift:
+        return notes
+    return [(s + shift, e + shift, p) for (s, e, p) in notes]
+
+
 def events_to_midi(events, dest: Path):
     pm = pretty_midi.PrettyMIDI()
     inst = pretty_midi.Instrument(program=0)
@@ -132,8 +146,9 @@ def main():
 
             # 自社spike
             spike_mid = OUT / f"{slug}_spike.mid"
-            transcribe_file(wav, out_midi=spike_mid, engine="poly")
-            sp = midi_notes(spike_mid)
+            sp_res = transcribe_file(wav, out_midi=spike_mid, engine="poly")
+            # 先頭無音トリム分だけ GT 時間軸へ整列してから採点(測定の是正)
+            sp = _align(midi_notes(spike_mid), float(sp_res.get("trimmed_leading_sec", 0.0)))
 
             row = {"slug": slug, "cat": cat, "gt_notes": len(gt), "status": "ok"}
             for name, pred in (("bp", bp), ("spike", sp)):
