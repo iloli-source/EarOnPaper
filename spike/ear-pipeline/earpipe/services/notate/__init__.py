@@ -39,6 +39,21 @@ from .instrument_profile import (
 from .ornament import interpret_ornaments
 from .piano_fingering import assign_fingering
 from .visual_card import CardLayout, card_layout, render_visual_card
+from .multivoice import separate_voices
+from .vocal_lyrics import MELISMA_CONTINUATION, align_lyrics, count_unassigned
+from .score_diff import diff_notes
+from .asset_io import export_asset, import_asset
+from .output_profiles import adjust_musicxml_for
+from .format_registry import (
+    FORMAT_REGISTRY,
+    OutputFormat,
+    available_formats,
+    get_format,
+)
+from .musescore_handoff import prepare_handoff
+from .handoff_package import HandoffManifest, build_handoff_package
+from .soundfont_preview import fluidsynth_available, render_soundfont_preview
+from .tempo_playback import is_artifact_prone, loop_region, time_stretch
 
 __all__ = [
     "to_score", "write_midi", "write_midi_raw", "write_musicxml",
@@ -58,4 +73,12 @@ __all__ = [
     "InstrumentProfile", "PROFILES", "FitResult", "fit_to_profile", "get_profile",
     "interpret_ornaments", "assign_fingering",
     "CardLayout", "card_layout", "render_visual_card",
+    "separate_voices",
+    "MELISMA_CONTINUATION", "align_lyrics", "count_unassigned",
+    "diff_notes", "export_asset", "import_asset",
+    "adjust_musicxml_for",
+    "OutputFormat", "FORMAT_REGISTRY", "available_formats", "get_format",
+    "prepare_handoff", "HandoffManifest", "build_handoff_package",
+    "fluidsynth_available", "render_soundfont_preview",
+    "time_stretch", "loop_region", "is_artifact_prone",
 ]

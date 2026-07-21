@@ -20,6 +20,12 @@ from earpipe.services.stem.separate import (
 )
 from earpipe.services.stem.diagnose import AudioQuality, diagnose_audio
 from earpipe.services.stem.chunk import Chunk, split_into_chunks
+from earpipe.services.stem.genai_preset import (
+    GENAI_PRESET,
+    GenaiPreset,
+    genai_preprocess,
+)
+from earpipe.services.stem.region_select import crop_region
 
 __all__ = [
     "FieldAnalysis",
@@ -40,4 +46,8 @@ __all__ = [
     "diagnose_audio",
     "Chunk",
     "split_into_chunks",
+    "GENAI_PRESET",
+    "GenaiPreset",
+    "genai_preprocess",
+    "crop_region",
 ]

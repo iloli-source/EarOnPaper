@@ -23,10 +23,13 @@ from earpipe.services.ear.velocity import (
     to_dynamic_marks,
 )
 from earpipe.services.ear.drums import detect_drums
+from earpipe.services.ear.hints import AnalysisHints, apply_hints
 
 __all__ = [
     "InstrumentGuess",
     "classify_instrument",
+    "AnalysisHints",
+    "apply_hints",
     "SustainSpan",
     "detect_sustain",
     "detect_sustain_audio",
