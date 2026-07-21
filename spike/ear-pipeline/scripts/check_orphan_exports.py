@@ -92,15 +92,24 @@ def _all_symbols(barrel: Path) -> list[str]:
     return []
 
 
-def compute_reachable() -> tuple[set[str], set[Path]]:
-    """pipeline.py を起点に import グラフを辿り、(実際にimportされる名前, 到達したファイル) を返す。"""
-    # barrel名 -> {reexport名: 定義ファイル}
+def compute_reachable() -> tuple[set[str], set[Path], dict[Path, set[str]]]:
+    """pipeline.py+emitters を起点に import グラフを辿る。
+
+    返り値:
+      - used: cross-module で ``from ... import NAME`` された名前(=名前 import による使用)。
+      - seen_files: 到達したファイル集合。
+      - calls_by_file: 到達ファイルごとの「bare な name() 呼び出し」名の集合。
+        呼び出しは **その名前の定義モジュール内でのみ** 使用と数える(find_orphans 側で突合)。
+        こうしないと、無関係な別モジュールの同名 bare 呼び出しで本物の孤立を偽陰性で隠す
+        (外部レビュー ラウンド2 指摘: 名前衝突による見逃し)。属性呼び出し mod.fn() も含めない。
+    """
     reexport = {b: _barrel_reexports(b) for b in BARRELS}
     reexport_by_file = {b.parent.name: reexport[b] for b in BARRELS}
     barrel_files = set(BARRELS)
 
     used: set[str] = set()
     seen_files: set[Path] = set()
+    calls_by_file: dict[Path, set[str]] = {}
     queue: list[Path] = [ENTRY, *EMITTERS]  # emitters は registry が実行時に全 import
 
     while queue:
@@ -112,20 +121,16 @@ def compute_reachable() -> tuple[set[str], set[Path]]:
             tree = ast.parse(f.read_text(encoding="utf-8"))
         except SyntaxError:
             continue
+        local_calls: set[str] = set()
         for node in ast.walk(tree):
-            # 直接呼び出し name() を「使用」に含める(モジュール内ヘルパの到達性を捉える。
-            # 例: run_compare が同一モジュールの build_compare_command を呼ぶ)。
-            # obj.name() の属性呼び出しは含めない — 同名メソッドで本物の孤立関数を誤って
-            # 隠す(mask する)のを避けるため(孤立の見逃しは厳禁)。
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-                used.add(node.func.id)
+                local_calls.add(node.func.id)  # このファイル内の bare 呼び出し
             if not isinstance(node, ast.ImportFrom):
                 continue
             mod = _resolve_from(node, f)
             if not mod or "earpipe" not in mod:
                 continue
             target = _module_to_file(mod)
-            # barrel からの import なら、名前を定義モジュールへ展開
             barrel_name = mod.rsplit(".", 1)[-1]
             bmap = reexport_by_file.get(barrel_name, {})
             for alias in node.names:
@@ -133,11 +138,11 @@ def compute_reachable() -> tuple[set[str], set[Path]]:
                 used.add(name)
                 if name in bmap:
                     queue.append(bmap[name])
-            # barrel(__init__)自体は展開しない: 入れると全再エクスポートが used に混入し、
-            # 「import されていない孤立」まで配線済みに見えてしまう。名前ごとに bmap で辿る。
+            # barrel(__init__)自体は展開しない: 入れると全再エクスポートが used に混入する。
             if target is not None and target not in barrel_files:
                 queue.append(target)
-    return used, seen_files
+        calls_by_file[f] = local_calls
+    return used, seen_files, calls_by_file
 
 
 def load_allowlist() -> set[str]:
@@ -177,8 +182,12 @@ def find_orphans() -> tuple[set[str], set[str]]:
     型・定数(データ契約)は、定義モジュールが到達可能なら配線済みとみなす。これらは wired 関数の
     返り値や引数として流通し、必ずしも名前 import されないため(例: validate_musicxml が返す
     ValidationReport)。ただし「関数」はこの緩和の対象外(挙動の死は隠さない)。
+
+    関数の「呼び出しによる到達」は **その関数の定義モジュール内での bare 呼び出しに限る**
+    (例: run_compare が同一 client.py 内で build_compare_command を呼ぶ)。無関係な別モジュールの
+    同名呼び出しは数えない(名前衝突での偽陰性を防ぐ・外部レビュー ラウンド2 指摘)。
     """
-    used, seen_files = compute_reachable()
+    used, seen_files, calls_by_file = compute_reachable()
     orphans: set[str] = set()
     for b in BARRELS:
         defmap = _barrel_reexports(b)
@@ -186,8 +195,14 @@ def find_orphans() -> tuple[set[str], set[str]]:
             if sym in used:
                 continue
             deffile = defmap.get(sym)
-            # 型/定数のみモジュール到達で許容。関数は名前 import されないと孤立。
-            if deffile in seen_files and not _is_function(deffile, sym):
+            if deffile not in seen_files:
+                orphans.add(sym)
+                continue
+            # 型/定数はモジュール到達で許容(データ契約)。
+            if not _is_function(deffile, sym):
+                continue
+            # 関数は「定義モジュール内で bare 呼び出しされている」ときのみ許容。
+            if sym in calls_by_file.get(deffile, set()):
                 continue
             orphans.add(sym)
     return orphans, used

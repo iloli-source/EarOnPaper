@@ -60,6 +60,24 @@ test('採譜→PDF表示→エクスポートUIが揃う(受入1・2・3)', asyn
     // 統計が実値で埋まる(空プレースホルダ — のまま残っていない)
     await expect(win.locator('#stat-notes')).not.toHaveText('—')
 
+    // 受入2+: 表面(type/src)だけでなく **生成物の中身** を検証する。
+    // 生成パスをフック経由で取得し、Node 側で実ファイルを読んで妥当性を確認する。
+    const paths = await win.evaluate(() => window.__earpipeTest?.lastResult?.paths)
+    expect(paths, '採譜結果の paths が取得できない').toBeTruthy()
+    // MusicXML: 実在・非空・音符と音高を含む(空の殻でない)
+    const xml = fs.readFileSync(paths.musicxml, 'utf8')
+    expect(xml).toMatch(/<score-partwise|<score-timewise/)
+    expect(xml).toMatch(/<note/)
+    expect(xml).toMatch(/<pitch>|<step>/)
+    // PDF: 実在・自明でないサイズ(空PDFでない)・%PDF シグネチャ
+    const pdfBuf = fs.readFileSync(paths.pdf)
+    expect(pdfBuf.length).toBeGreaterThan(1000)
+    expect(pdfBuf.subarray(0, 5).toString()).toBe('%PDF-')
+    // MIDI: 実在・非空・MThd ヘッダ
+    const midiBuf = fs.readFileSync(paths.midi)
+    expect(midiBuf.length).toBeGreaterThan(0)
+    expect(midiBuf.subarray(0, 4).toString()).toBe('MThd')
+
     // 受入3: 3 形式のエクスポートボタンが有効
     for (const id of ['#btn-export-pdf', '#btn-export-musicxml', '#btn-export-midi']) {
       await expect(win.locator(id)).toBeEnabled()

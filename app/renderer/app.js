@@ -204,6 +204,8 @@ async function startTranscribe(filePath, fileName) {
       removeProgressListener = null
     }
     currentResult = result
+    // E2E(?e2e=1 時のみ生えるフック)へ結果を渡し、生成物の中身検証を可能にする
+    if (window.__earpipeTest) window.__earpipeTest.lastResult = result
     // 完了: バー100%→チャイム→結果表示
     const bar = document.getElementById('stage-progress-bar')
     if (bar) bar.style.width = '100%'

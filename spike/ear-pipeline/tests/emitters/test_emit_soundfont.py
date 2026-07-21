@@ -42,7 +42,8 @@ def test_soundfont_emit_writes_audible_audio(tmp_path: Path) -> None:
 
 
 def test_soundfont_emit_respects_sr_param(tmp_path: Path) -> None:
-    # Arrange: sr パラメータを明示指定しても非空ファイルが出ること。
+    """sr パラメータが実際に出力WAVのサンプルレートへ反映される(名前通りの検証)。"""
+    # Arrange: sr=16000 を明示
     notes = [QuantizedNote(start_beats=0.0, dur_beats=1.0, midi=67, confidence=1.0)]
     ctx = EmitContext(
         notes=notes, bpm=100.0, title="soundfont-sr", params={"sr": "16000"}
@@ -52,9 +53,10 @@ def test_soundfont_emit_respects_sr_param(tmp_path: Path) -> None:
     # Act
     written = soundfont_emitter.emit(ctx, out_path)
 
-    # Assert
+    # Assert: 読み返して sr が 16000(サイズだけでなく実サンプルレートを検証)
     assert written.exists()
-    assert written.stat().st_size > 0
+    _data, sr = sf.read(str(written))
+    assert sr == 16000, f"sr パラメータが反映されていない: {sr}"
 
 
 def test_soundfont_emit_missing_sf2_raises(tmp_path: Path) -> None:

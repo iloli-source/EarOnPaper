@@ -47,7 +47,7 @@ export EARPIPE_BP_PYTHON=/path/to/python3.12
 ### 3. 採譜してみる
 
 ```bash
-# 単旋律（既定・高速）
+# 既定（--engine auto: 音源に応じ mono/poly を自動選択）
 .venv/bin/python -m earpipe.pipeline transcribe 音源.wav -o 楽譜.musicxml
 
 # 多声 + MIDI も出力
@@ -106,7 +106,7 @@ transcribe 音源 [オプション]
   --tab FILE             ギターTAB譜 PDF 出力先（6弦標準EADGBE・コード帯つき）
   --tab-plain FILE       押さえ図なしTAB（コードネームのみ）の出力先
   --no-chord-diagrams    TABのコード帯を押さえ図なしにする（既定は図あり）
-  --engine mono|poly     mono=pYIN 単旋律（既定）/ poly=Basic Pitch 多声
+  --engine auto|mono|poly  auto=音源に応じ自動選択（**既定**・#64）/ mono=pYIN単旋律 / poly=Basic Pitch多声
   --sensitivity auto|normal|high
                          poly 検出感度（auto=密度適応・既定、high=弱音拾う）
   --field-mode           フィールド録音モード（SNR 適応・非音程成分を除去）

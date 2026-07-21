@@ -100,7 +100,7 @@ def test_allowlist_covers_all_current_orphans():
 
 
 def test_gate_fails_on_new_orphan(monkeypatch):
-    """孤立0の今、合成した新規孤立を注入すると main() が 1 を返す(ゲート実効性)。"""
+    """合成した新規孤立(allowlist未登録)を注入すると main() が 1 を返す(ゲート実効性)。"""
     # Arrange: allowlist 未登録の合成孤立を find_orphans が返すよう差し替え
     monkeypatch.setattr(orphan, "find_orphans", lambda: ({"__synthetic_orphan__"}, set()))
     # Act
