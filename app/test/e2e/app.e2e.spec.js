@@ -101,3 +101,28 @@ test('不正入力でエラーメッセージが表示される(受入4)', async
     await app.close()
   }
 })
+
+test('詳細エクスポート(簡譜)が GUI 経路で実ファイルを生成する(音楽家向け導線)', async () => {
+  // 音楽家向け理論系出力を GUI(IPC→エンジン→保存)から実生成できることを固定する。
+  const app = await electron.launch({ args: [APP_DIR], env: { ...process.env, EARPAPER_E2E: '1' } })
+  try {
+    const win = await app.firstWindow()
+    // 詳細エクスポートボタンが DONE 画面に存在する(音楽家向け導線が UI に露出している)
+    await expect(win.locator('#extra-export-buttons [data-extra="jianpu"]')).toHaveCount(1)
+
+    // E2E は保存ダイアログを操作できないため、EARPAPER_E2E 時のみ許される savePath 引数で保存先を渡す。
+    const outPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-x-e2e-')), 'jianpu.txt')
+    const saved = await win.evaluate(
+      (arg) => window.earpipe.exportExtra(arg.p, 'jianpu', arg.sp),
+      { p: wavPath, sp: outPath }
+    )
+
+    // 実ファイルが生成され、簡譜(数字譜)らしい内容を含む
+    expect(saved).toBe(outPath)
+    const content = fs.readFileSync(outPath, 'utf8')
+    expect(content.trim().length).toBeGreaterThan(0)
+    expect(content).toMatch(/[1-7]/)
+  } finally {
+    await app.close()
+  }
+})

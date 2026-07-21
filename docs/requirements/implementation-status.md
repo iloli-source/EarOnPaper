@@ -48,7 +48,7 @@
 | F-048 | MusicXMLエクスポート | 1 | ✅ | `score.py:write_musicxml()` music21 |
 | F-049 | MIDIエクスポート | 1 | ✅ | `score.py:write_midi()` grid/raw二重 |
 | F-050 | PDF楽譜出力 | 2 | ✅ | `engrave.py:write_pdf()` |
-| F-052 | **MusicXML妥当性検証** | 1 | ✅ | `notate/musicxml_validate.py` XSD/構造/ラウンドトリップ検証(#66) |
+| F-052 | **MusicXML妥当性検証** | 1 | 🟡 | 検証機能は `notate/musicxml_validate.py`(XSD/構造/ラウンドトリップ・#66)に実装済だが、**既定出力へは自動適用せず** `--emit validate` で任意実行(NF-011と同じ限界) |
 | F-066 | 完全ローカル処理 | 1 | ✅ | 外部送信コードなし |
 | F-068 | 日本語UI | 2 | ✅ | app全体が日本語 |
 | F-071 | 無料試用 | 2 | 🚫 | **OSS化で対象外(Won't)**。全機能無料のため「試用」概念が成立しない(前提追随・2026-07-21) |

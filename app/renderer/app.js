@@ -120,6 +120,7 @@ const states = {
 }
 
 let currentResult = null
+let currentInputPath = null  // 詳細エクスポートで元音声を再採譜するため保持
 let removeProgressListener = null
 
 function showState(name) {
@@ -173,6 +174,7 @@ async function triggerFileOpen() {
 
 
 async function startTranscribe(filePath, fileName) {
+  currentInputPath = filePath  // 詳細エクスポートで再利用
   const title = cleanTitle(fileName)
   document.getElementById('processing-file').textContent = title
   currentStage = -1
@@ -269,6 +271,29 @@ document.getElementById('btn-export-midi').addEventListener('click', async () =>
   if (!currentResult?.paths?.midi) return
   const name = window.earpipe.basenameForDisplay(currentResult.paths.midi)
   await window.earpipe.saveFile(currentResult.paths.midi, 'mid', name)
+})
+
+// 詳細（音楽家向け）エクスポート: 簡譜/度数/Nashville/GP5 等を元音声から生成して保存する。
+// 生成には元音声の再採譜が要るため数秒かかる。押下中はボタンを無効化し状態を表示する。
+const extraStatus = document.getElementById('extra-export-status')
+document.querySelectorAll('#extra-export-buttons [data-extra]').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    if (!currentInputPath) return
+    const key = btn.dataset.extra
+    const buttons = document.querySelectorAll('#extra-export-buttons [data-extra]')
+    buttons.forEach((b) => { b.disabled = true })
+    extraStatus.textContent = `${btn.textContent.trim()} を生成中…（元音声を解析します）`
+    try {
+      const saved = await window.earpipe.exportExtra(currentInputPath, key)
+      extraStatus.textContent = saved
+        ? `保存しました: ${window.earpipe.basenameForDisplay(saved)}`
+        : 'キャンセルしました'
+    } catch (err) {
+      extraStatus.textContent = `エラー: ${err?.message || err}`
+    } finally {
+      buttons.forEach((b) => { b.disabled = false })
+    }
+  })
 })
 
 document.getElementById('btn-retry').addEventListener('click', () => {

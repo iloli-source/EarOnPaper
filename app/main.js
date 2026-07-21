@@ -213,3 +213,74 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '
     })
   })
 })
+
+// ── 詳細（音楽家向け）エクスポート ──────────────────────────────
+// 簡譜/リードシート/度数/Nashville/GP5 等の理論系出力を GUI から生成する(#音楽家対象)。
+// CLI にしか無かった --format/--analysis 出力を、ユーザーが実際に触れる導線へ露出する。
+
+// key -> { kind, ext }。format=登録形式 / analysis=解析注釈。
+const EXTRA_OUTPUTS = {
+  jianpu: { kind: 'format', ext: 'txt' },
+  leadsheet: { kind: 'format', ext: 'txt' },
+  abc: { kind: 'format', ext: 'txt' },
+  lilypond: { kind: 'format', ext: 'txt' },
+  gp5: { kind: 'format', ext: 'gp5' },
+  ust: { kind: 'format', ext: 'ust' },
+  movable_do: { kind: 'analysis', ext: 'txt' },
+  roman: { kind: 'analysis', ext: 'txt' },
+  nashville: { kind: 'analysis', ext: 'txt' },
+}
+
+function runEngine(args) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(PYTHON, ['-W', 'ignore::RuntimeWarning', '-m', 'earpipe.pipeline', ...args],
+      { cwd: ENGINE_DIR, env: { ...process.env } })
+    activeProcesses.add(proc)
+    let stderr = ''
+    proc.stderr.on('data', (d) => { stderr += d.toString() })
+    proc.on('error', (e) => { activeProcesses.delete(proc); reject(new Error(`Python起動失敗: ${e.message}`)) })
+    proc.on('close', (code) => {
+      activeProcesses.delete(proc)
+      if (code === 0) resolve()
+      else reject(new Error(`採譜エンジンがエラー終了 (code ${code})\n${stderr}`))
+    })
+  })
+}
+
+// 追加出力を1つ生成して保存する。savePath は E2E(EARPAPER_E2E=1)のときだけ引数指定を許し、
+// それ以外は必ず保存ダイアログを出す(本番でレンダラが任意パスへ書けないようにする)。
+ipcMain.handle('export-extra', async (_, inputPath, key, e2eSavePath) => {
+  const spec = EXTRA_OUTPUTS[key]
+  if (!spec) throw new Error('対応していない出力形式です')
+  if (!pu.isAllowedAudioInput(inputPath)) throw new Error('入力音声が不正です')
+  try {
+    if (!fs.statSync(inputPath).isFile()) throw new Error('not a file')
+  } catch {
+    throw new Error('元の音声ファイルが見つかりません')
+  }
+
+  let savePath
+  if (process.env.EARPAPER_E2E === '1' && e2eSavePath) {
+    savePath = e2eSavePath
+  } else {
+    const res = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: `楽譜.${key}.${spec.ext}`,
+      filters: [{ name: key, extensions: [spec.ext] }],
+    })
+    if (res.canceled) return null
+    savePath = res.filePath
+  }
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-x-'))
+  generatedRoots.add(tmpDir)
+  const tmpXml = path.join(tmpDir, 'base.musicxml')  // lilypond 等は -o(MusicXML)を要する
+  const flag = spec.kind === 'format' ? '--format' : '--analysis'
+  await runEngine(['transcribe', inputPath, '-o', tmpXml, flag, `${key}=${savePath}`, '--engine', 'auto'])
+
+  // 生成物の実体(存在・非空)を確認してから成功応答(偽成功防止)
+  const st = fs.existsSync(savePath) ? fs.statSync(savePath) : null
+  if (!st || !st.isFile() || st.size === 0) {
+    throw new Error(`${key} の出力生成に失敗しました`)
+  }
+  return savePath
+})

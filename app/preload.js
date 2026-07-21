@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld('earpipe', {
   transcribe: (filePath, engine, title) => ipcRenderer.invoke('transcribe', filePath, engine, title),
   openFileDialog: () => ipcRenderer.invoke('open-file-dialog'),
   saveFile: (src, ext, name) => ipcRenderer.invoke('save-file', src, ext, name),
+  // 詳細エクスポート(簡譜/度数/GP5等)。savePath は E2E 時のみ使用。
+  exportExtra: (inputPath, key, e2eSavePath) =>
+    ipcRenderer.invoke('export-extra', inputPath, key, e2eSavePath),
   openExternal: (filePath) => ipcRenderer.invoke('open-external', filePath),
   getPathForFile: (file) => webUtils.getPathForFile(file),
   // 3.3: クロスプラットフォームな basename を renderer 側へ公開(純粋・sandbox安全)
