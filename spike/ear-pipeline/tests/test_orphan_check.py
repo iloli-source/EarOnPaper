@@ -30,20 +30,24 @@ def test_known_wired_symbols_are_not_orphans():
 
 
 def test_dispatch_wired_formats_are_not_orphans():
-    """#109 B-1 で --format 経由に結線した形式は孤立でない(結線の回帰固定)。"""
+    """#109 B-1/B-2a で結線した形式・解析は孤立でない(結線の回帰固定)。"""
     # Arrange / Act
     orphans, _ = orphan.find_orphans()
-    # Assert: dispatch.py の adapter が呼ぶ producer
-    for sym in ["to_jianpu", "to_leadsheet", "to_ust", "to_llm_text"]:
-        assert sym not in orphans, f"{sym} は #109 B-1 で結線済みのはず"
+    # Assert: B-1 dispatch.py の producer + B-2a analysis_dispatch.py の producer
+    wired = [
+        "to_jianpu", "to_leadsheet", "to_ust", "to_llm_text",  # B-1 --format
+        "to_movable_do", "to_roman", "to_nashville",  # B-2a --analysis
+    ]
+    for sym in wired:
+        assert sym not in orphans, f"{sym} は #109 で結線済みのはず"
 
 
 def test_known_unwired_features_are_detected_as_orphans():
     """export 済みだが今も pipeline 未配線の機能は孤立として検出される。"""
     # Arrange / Act
     orphans, _ = orphan.find_orphans()
-    # Assert: まだ結線されていない孤立機能の代表(B-2 以降の対象)
-    for sym in ["to_movable_do", "write_guitarpro", "detect_drums", "assign_fingering"]:
+    # Assert: まだ結線されていない孤立機能の代表(B-2c/d/e 以降の対象)
+    for sym in ["simplify_density", "write_guitarpro", "detect_drums", "assign_fingering"]:
         assert sym in orphans, f"{sym} は孤立のはず(未配線・B-2対象)"
 
 

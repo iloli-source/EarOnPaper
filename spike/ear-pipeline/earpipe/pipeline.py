@@ -30,6 +30,11 @@ from earpipe.services.notate import (
     write_pdf,
     write_tab_pdf,
 )
+from earpipe.services.notate.analysis_dispatch import (
+    AnalysisContext,
+    default_analysis_path,
+    dispatch_analysis,
+)
 from earpipe.services.notate.dispatch import (
     DispatchContext,
     default_out_path,
@@ -70,6 +75,7 @@ def transcribe_file(
     chord_diagrams: bool = True,
     stem: str | None = None,
     formats: list[tuple[str, str]] | None = None,
+    analyses: list[tuple[str, str]] | None = None,
 ) -> dict:
     """音声ファイルを採譜する。engine: auto(既定・#64) / mono(pYIN単音) / poly(basic-pitch多声)。
 
@@ -288,6 +294,16 @@ def transcribe_file(
             )
         result["formats"] = outputs
 
+    # 解析テキスト出力ディスパッチ(#109 B-2a): 移動ド(F-100)/ローマ数字度数・
+    # ナッシュビル(F-091)は登録簿の「形式」ではなく採譜結果の派生注釈。--analysis 経由。
+    if analyses:
+        actx = AnalysisContext(notes=notes, bpm=bpm)
+        analysis_outputs = []
+        for key, ana_out in analyses:
+            path = dispatch_analysis(key, actx, ana_out)
+            analysis_outputs.append({"key": key, "path": str(path)})
+        result["analyses"] = analysis_outputs
+
     return result
 
 
@@ -305,6 +321,24 @@ def _parse_format_specs(
         key, sep, path = spec.partition("=")
         key = key.strip()
         out_path = path.strip() if sep else default_out_path(key, input_path)
+        parsed.append((key, out_path))
+    return parsed
+
+
+def _parse_analysis_specs(
+    specs: list[str] | None, input_path: str
+) -> list[tuple[str, str]] | None:
+    """``["movable_do=out.txt", "roman"]`` を ``[(key, out_path), ...]`` に解決する。
+
+    ``KEY=PATH`` でパスを明示でき、省略時は '入力名.KEY.txt' を組む。
+    """
+    if not specs:
+        return None
+    parsed: list[tuple[str, str]] = []
+    for spec in specs:
+        key, sep, path = spec.partition("=")
+        key = key.strip()
+        out_path = path.strip() if sep else default_analysis_path(key, input_path)
         parsed.append((key, out_path))
     return parsed
 
@@ -358,6 +392,11 @@ def main(argv: list[str] | None = None) -> int:
         help="追加の出力形式(F-104 FORMAT_REGISTRY・複数指定可)。例: --format jianpu=out.txt。"
              "PATH省略時は '入力名.KEY.拡張子'。対応: jianpu/leadsheet/ust/abc/lilypond",
     )
+    pt.add_argument(
+        "--analysis", dest="analyses", action="append", metavar="KEY[=PATH]", default=None,
+        help="解析テキスト出力(F-091/F-100・複数指定可)。例: --analysis movable_do。"
+             "PATH省略時は '入力名.KEY.txt'。対応: movable_do/roman/nashville",
+    )
 
     # 楽器毎に分けて譜面化(F-003): 1回の分離で旋律ステム各々を別々の譜面にする
     ps = sub.add_parser("separate-transcribe", help="ステム分離して楽器毎に別々の譜面を生成")
@@ -376,6 +415,7 @@ def main(argv: list[str] | None = None) -> int:
 
     out = args.output or str(Path(args.input).with_suffix(".musicxml"))
     formats = _parse_format_specs(args.formats, args.input)
+    analyses = _parse_analysis_specs(args.analyses, args.input)
     result = transcribe_file(
         args.input,
         out_musicxml=out,
@@ -392,6 +432,7 @@ def main(argv: list[str] | None = None) -> int:
         title=args.title,
         stem=args.stem,
         formats=formats,
+        analyses=analyses,
     )
     summary = {k: v for k, v in result.items() if k != "notes"}
     summary["output"] = out

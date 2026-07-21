@@ -89,3 +89,30 @@ def test_transcribe_dispatch_formats_are_generated(simple_wav, tmp_path):
         out = tmp_path / f"{k}.out"
         assert out.is_file(), f"{k} が生成されていない"
         assert out.stat().st_size > 0, f"{k} が空"
+
+
+def test_transcribe_analysis_outputs_are_generated(simple_wav, tmp_path):
+    """--analysis 経由の解析注釈(#109 B-2a: 移動ド/度数/Nashville)が e2e で実生成される。
+
+    「export 済みだが未配線」を防ぐため、CLI から各解析が実際に出せることを固定する。
+    新しい解析を結線したら本ケースに key を追加すること。
+    """
+    # Arrange
+    wav_path, _melody, _bpm = simple_wav
+    out_xml = tmp_path / "a.musicxml"
+    keys = ["movable_do", "roman", "nashville"]
+    ana_args = []
+    for k in keys:
+        ana_args += ["--analysis", f"{k}={tmp_path / (k + '.txt')}"]
+
+    # Act
+    rc = pipeline.main(
+        ["transcribe", str(wav_path), "-o", str(out_xml), "--engine", "mono", *ana_args]
+    )
+
+    # Assert: 全解析が通常ファイルで非空
+    assert rc == 0
+    for k in keys:
+        out = tmp_path / f"{k}.txt"
+        assert out.is_file(), f"{k} が生成されていない"
+        assert out.stat().st_size > 0, f"{k} が空"

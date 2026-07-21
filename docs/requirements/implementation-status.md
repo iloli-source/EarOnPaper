@@ -66,8 +66,8 @@
 | F-034 | コード譜・リードシート | 2 | ✅ | `notate/leadsheet.py:to_leadsheet()`(#71) |
 | F-041 | スペクトログラム表示 | 2 | ⬜ | UI未 |
 | F-054 | 音声プレビュー出力 | 2 | ✅ | `notate/preview.py:render_preview()` MIDI→WAV/MP3(#69) |
-| F-091 | 度数/ローマ数字/Nashville | 3 | ✅ | `notate/roman_nashville.py`(#74) |
-| F-100 | 移動ド記譜 | 3 | ✅ | `notate/movable_do.py:to_movable_do()`(#75) |
+| F-091 | 度数/ローマ数字/Nashville | 3 | ✅ | `notate/roman_nashville.py`(#74)。**CLI結線済(#109 B-2a)**: `transcribe --analysis roman/nashville` |
+| F-100 | 移動ド記譜 | 3 | ✅ | `notate/movable_do.py:to_movable_do()`(#75)。**CLI結線済(#109 B-2a)**: `transcribe --analysis movable_do` |
 | F-059〜F-065 | 練習支援群 | 2-3 | ⬜ | テンポ変更/移調/ループ/学習モード等 |
 
 ## 非機能要件 Must（20件）

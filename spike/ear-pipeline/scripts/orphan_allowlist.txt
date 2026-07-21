@@ -76,9 +76,6 @@ staff_to_tab_frets
 tab_to_staff
 time_stretch
 to_dynamic_marks
-to_movable_do
-to_nashville
-to_roman
 transpose_key
 transpose_notes
 transpose_tab_out_of_range
