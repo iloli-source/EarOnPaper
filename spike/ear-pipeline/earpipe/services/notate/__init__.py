@@ -27,6 +27,18 @@ from .transpose import (
 )
 from .convert import staff_to_jianpu, staff_to_tab_frets, tab_to_staff
 from .density import DroppedNote, simplify_density, simplify_density_verbose
+from .render_text import render_jianpu_pdf, render_leadsheet_pdf, render_png_preview
+from .drum_notation import drums_to_musicxml, gm_note_to_musicxml_unpitched
+from .instrument_profile import (
+    PROFILES,
+    FitResult,
+    InstrumentProfile,
+    fit_to_profile,
+    get_profile,
+)
+from .ornament import interpret_ornaments
+from .piano_fingering import assign_fingering
+from .visual_card import CardLayout, card_layout, render_visual_card
 
 __all__ = [
     "to_score", "write_midi", "write_midi_raw", "write_musicxml",
@@ -41,4 +53,9 @@ __all__ = [
     "transpose_notes", "transpose_key", "spell_transposed_key", "transpose_tab_out_of_range",
     "staff_to_jianpu", "staff_to_tab_frets", "tab_to_staff",
     "DroppedNote", "simplify_density", "simplify_density_verbose",
+    "render_jianpu_pdf", "render_leadsheet_pdf", "render_png_preview",
+    "drums_to_musicxml", "gm_note_to_musicxml_unpitched",
+    "InstrumentProfile", "PROFILES", "FitResult", "fit_to_profile", "get_profile",
+    "interpret_ornaments", "assign_fingering",
+    "CardLayout", "card_layout", "render_visual_card",
 ]
