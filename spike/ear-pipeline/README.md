@@ -113,7 +113,25 @@ transcribe 音源 [オプション]
   --postfilter           幽霊音符除去フィルタ（既定 OFF）
   --timing grid|raw      MIDI タイミング（grid=楽譜整合/既定、raw=実タイミング）
   --title TEXT           楽譜タイトル（省略時: ファイル名）
+  --stem NAME            ステム分離して指定楽器だけ採譜（vocals/drums/bass/other・要Demucs）
+  --format KEY[=PATH]    追加の出力形式（複数可）: jianpu/leadsheet/ust/abc/lilypond/gp5
+  --analysis KEY[=PATH]  解析テキスト（複数可）: movable_do（移動ド）/roman（度数）/nashville
+  --emit KEY[=PATH][#k=v] 実装機能のオプトイン副次出力（複数可）。既定の記譜出力は不変。
+                         例: --emit validate / --emit simplify#level=0.7 / --emit diagnose
+                         （drums/velocity/sustain/transpose/handoff/profile 等 30種以上）
 ```
+
+`transcribe` 以外のサブコマンド:
+
+```
+separate-transcribe 音源 --out-dir DIR   ステム分離して楽器毎に別譜面（F-003）
+chunk 音源 --out-dir DIR [--max-sec N]   長尺音源を無音優先で複数wavに分割（F-004）
+diff A音源 B音源 [-o FILE]               2音源を採譜し音符列の意味論的差分を出力
+compare 原音 transcription [--report F]  AIの耳（ai-ears）で比較評価
+```
+
+> **実装機能はすべて CLI から到達可能**（孤立0・#109）。「ユニット緑だが未配線」を機械ゲート
+> （`scripts/check_orphan_exports.py`・CI常設）で検出し、85件の債務を全消化済み。
 
 ---
 
@@ -138,7 +156,7 @@ transcribe 音源 [オプション]
 ### 6. テスト
 
 ```bash
-# エンジン全テスト（353 件）
+# エンジン全テスト（1165 件）
 .venv/bin/python -m pytest tests/ -q
 
 # 並列実行（pytest-xdist）
@@ -198,7 +216,7 @@ spike/ear-pipeline/
 │           ├── tab.py       # ギターTAB譜 PDF（運指DP・重なり検査）
 │           ├── chord.py     # コード推定（クロマ・テンプレート相関）
 │           └── chord_shapes.py # コード押さえ図（開放形＋バレー計算）
-├── tests/                   # pytest（353 件）
+├── tests/                   # pytest（1165 件）
 ├── bench/                   # PD 正解付きベンチ
 ├── usertest/                # 体験テスト（採譜→聴き比べビューア。音源は非公開）
 └── requirements.txt
