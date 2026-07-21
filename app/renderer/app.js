@@ -164,7 +164,7 @@ btnOpen.addEventListener('click', (e) => {
 async function triggerFileOpen() {
   const filePath = await window.earpipe.openFileDialog()
   if (filePath) {
-    const name = filePath.split('/').pop()
+    const name = window.earpipe.basenameForDisplay(filePath)
     startTranscribe(filePath, name)
   }
 }
@@ -190,7 +190,11 @@ async function startTranscribe(filePath, fileName) {
   })
 
   if (removeProgressListener) removeProgressListener()
-  removeProgressListener = window.earpipe.onProgress(() => {})
+  // 3.5: 実処理ログからステージを検出してUIへ反映(タイマー任せの見かけ進捗を是正)
+  removeProgressListener = window.earpipe.onProgress((msg) => {
+    const stage = detectStageFromLog(msg)
+    if (stage >= 0) setStage(stage)
+  })
 
   try {
     const result = await window.earpipe.transcribe(filePath, 'auto', title)
@@ -237,7 +241,7 @@ function showResult(result) {
   // PDF表示
   if (result.paths?.pdf) {
     const embed = document.createElement('embed')
-    embed.src = `file://${result.paths.pdf}`
+    embed.src = window.earpipe.filePathToUrl(result.paths.pdf)
     embed.type = 'application/pdf'
     scorePanel.innerHTML = ''
     scorePanel.appendChild(embed)
@@ -249,19 +253,19 @@ function showResult(result) {
 // エクスポートボタン
 document.getElementById('btn-export-pdf').addEventListener('click', async () => {
   if (!currentResult?.paths?.pdf) return
-  const name = currentResult.paths.pdf.split('/').pop()
+  const name = window.earpipe.basenameForDisplay(currentResult.paths.pdf)
   await window.earpipe.saveFile(currentResult.paths.pdf, 'pdf', name)
 })
 
 document.getElementById('btn-export-musicxml').addEventListener('click', async () => {
   if (!currentResult?.paths?.musicxml) return
-  const name = currentResult.paths.musicxml.split('/').pop()
+  const name = window.earpipe.basenameForDisplay(currentResult.paths.musicxml)
   await window.earpipe.saveFile(currentResult.paths.musicxml, 'musicxml', name)
 })
 
 document.getElementById('btn-export-midi').addEventListener('click', async () => {
   if (!currentResult?.paths?.midi) return
-  const name = currentResult.paths.midi.split('/').pop()
+  const name = window.earpipe.basenameForDisplay(currentResult.paths.midi)
   await window.earpipe.saveFile(currentResult.paths.midi, 'mid', name)
 })
 

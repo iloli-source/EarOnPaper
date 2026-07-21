@@ -3,10 +3,15 @@ const { spawn } = require('child_process')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
+const pu = require('./platform-utils')
 
 const ENGINE_DIR = path.resolve(__dirname, '../spike/ear-pipeline')
-const PYTHON = path.join(ENGINE_DIR, '.venv/bin/python')
-const PYTHON312 = path.join(ENGINE_DIR, '.venv312/bin/python3.12')
+// 3.2: OS別候補から実在するPythonを解決(POSIX固定をやめWindows/構成差に対応)
+const PYTHON = pu.resolveExecutable(pu.pythonCandidates(ENGINE_DIR))
+
+// 3.17/3.18: 生成した一時ディレクトリと採譜子プロセスを追跡し、終了時に片付ける
+const generatedRoots = new Set()
+const activeProcesses = new Set()
 
 let mainWindow
 
@@ -38,37 +43,93 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow()
 })
 
+// 3.17/3.18: 終了時に残留プロセスをkillし、一時ディレクトリを再帰削除
+app.on('before-quit', () => {
+  for (const proc of activeProcesses) {
+    try { proc.kill() } catch { /* already gone */ }
+  }
+  activeProcesses.clear()
+  for (const root of generatedRoots) {
+    try { fs.rmSync(root, { recursive: true, force: true }) } catch { /* best effort */ }
+  }
+  generatedRoots.clear()
+})
+
+// 管理下(アプリ生成物)の判定: いずれかの一時ルート配下かつ許可拡張子(3.14/3.15/3.20)
+function isOwnedOutput(filePath) {
+  for (const root of generatedRoots) {
+    if (pu.isManagedOutput(root, filePath)) return true
+  }
+  return false
+}
+
+// 生成物3種すべてが通常ファイルかつ0バイト超であることを確認(3.8: 偽成功の防止)
+async function ensureOutputs(paths) {
+  for (const p of Object.values(paths)) {
+    let st
+    try {
+      st = await fs.promises.stat(p)
+    } catch {
+      throw new Error(`出力ファイルが生成されませんでした: ${pu.basenameForDisplay(p)}`)
+    }
+    if (!st.isFile() || st.size <= 0) {
+      throw new Error(`出力ファイルが不正です(空/非ファイル): ${pu.basenameForDisplay(p)}`)
+    }
+  }
+}
+
 // ファイル選択ダイアログ
 ipcMain.handle('open-file-dialog', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
     filters: [
-      { name: '音声ファイル', extensions: ['wav', 'mp3', 'flac', 'ogg', 'm4a', 'aiff', 'aac', 'opus', 'mp4'] },
+      { name: '音声ファイル', extensions: ['wav', 'mp3', 'flac', 'ogg', 'm4a', 'aiff', 'aif', 'aac', 'opus', 'mp4'] },
       { name: 'すべてのファイル', extensions: ['*'] },
     ],
   })
   return result.canceled ? null : result.filePaths[0]
 })
 
-// 保存ダイアログ
+// 保存ダイアログ(3.14: コピー元をアプリ生成物に限定・3.10: 非同期コピー)
 ipcMain.handle('save-file', async (_, srcPath, ext, defaultName) => {
+  if (!isOwnedOutput(srcPath)) {
+    throw new Error('保存できるのはアプリが生成した楽譜ファイルのみです')
+  }
   const result = await dialog.showSaveDialog(mainWindow, {
     defaultPath: defaultName || `楽譜.${ext}`,
-    filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
+    filters: [{ name: String(ext).toUpperCase(), extensions: [ext] }],
   })
   if (result.canceled) return null
-  fs.copyFileSync(srcPath, result.filePath)
+  await fs.promises.copyFile(srcPath, result.filePath)
   return result.filePath
 })
 
-// PDFをOSのデフォルトアプリで開く
+// PDFをOSのデフォルトアプリで開く(3.15: 管理下生成物に限定・3.9: エラー文字列を確認)
 ipcMain.handle('open-external', async (_, filePath) => {
-  await shell.openPath(filePath)
+  if (!isOwnedOutput(filePath)) {
+    throw new Error('開けるのはアプリが生成した楽譜ファイルのみです')
+  }
+  const errMsg = await shell.openPath(filePath)
+  if (errMsg) {
+    throw new Error(`ファイルを開けませんでした: ${errMsg}`)
+  }
 })
 
 // 採譜実行
 ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '') => {
+  // 3.16: IPC境界で入力を再検証(拡張子allowlist + 通常ファイル)
+  if (!pu.isAllowedAudioInput(inputPath)) {
+    throw new Error('対応していない形式です(音声ファイルを選んでください)')
+  }
+  try {
+    const st = fs.statSync(inputPath)
+    if (!st.isFile()) throw new Error('not a file')
+  } catch {
+    throw new Error('入力ファイルが見つからないか、ファイルではありません')
+  }
+
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-'))
+  generatedRoots.add(tmpDir)  // 3.17: 終了時削除の対象に追跡
   const baseName = path.basename(inputPath, path.extname(inputPath))
   const outMusicxml = path.join(tmpDir, `${baseName}.musicxml`)
   const outPdf = path.join(tmpDir, `${baseName}.pdf`)
@@ -85,14 +146,19 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '
       '--midi', outMidi,
       '--engine', selected,
     ]
-    if (title) args.push('--title', title)
+    const safeTitle = pu.clampTitle(title)  // 3.19: 200文字上限
+    if (safeTitle) args.push('--title', safeTitle)
 
-    // auto は poly に解決されうるため、mono 明示指定以外は basic-pitch 用 Python を渡す
+    // 3.6: mono以外はbasic-pitch用Pythonを渡すが、実在する場合のみ設定する
+    // (存在しないパスの強制でワーカー起動を壊さない。無ければエンジンが自動探索)
     const env = { ...process.env }
-    if (selected !== 'mono') env.EARPIPE_BP_PYTHON = PYTHON312
+    if (selected !== 'mono') {
+      const bp = pu.resolveExistingPath(pu.basicPitchPythonCandidates(ENGINE_DIR, env))
+      if (bp) env.EARPIPE_BP_PYTHON = bp
+    }
 
-    console.log('[earpipe] CMD:', PYTHON, args.join(' '))
     const proc = spawn(PYTHON, args, { cwd: ENGINE_DIR, env })
+    activeProcesses.add(proc)  // 3.18: 終了時killの対象に追跡
 
     let stdout = ''
     let stderr = ''
@@ -105,32 +171,32 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '
       const line = chunk.toString().trim()
       if (line) {
         stderr += line + '\n'
-        // 進捗をレンダラーに送信
         event.sender.send('transcribe-progress', line)
       }
     })
 
     proc.on('close', (code) => {
+      activeProcesses.delete(proc)
       if (code !== 0) {
         reject(new Error(`採譜エンジンがエラーで終了しました (code ${code})\n${stderr}`))
         return
       }
+      let result
       try {
-        const result = JSON.parse(stdout)
-        resolve({
-          ...result,
-          paths: {
-            musicxml: outMusicxml,
-            pdf: outPdf,
-            midi: outMidi,
-          },
-        })
+        result = JSON.parse(stdout)
       } catch {
         reject(new Error('エンジン出力のパースに失敗しました'))
+        return
       }
+      const paths = { musicxml: outMusicxml, pdf: outPdf, midi: outMidi }
+      // 3.8: 成果物の実体(存在・非空)を確認してから成功応答する
+      ensureOutputs(paths)
+        .then(() => resolve({ ...result, paths }))
+        .catch(reject)
     })
 
     proc.on('error', (err) => {
+      activeProcesses.delete(proc)
       reject(new Error(`Pythonの起動に失敗しました: ${err.message}`))
     })
   })

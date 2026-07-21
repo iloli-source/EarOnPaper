@@ -8,7 +8,9 @@ from pathlib import Path
 import pytest
 
 HARNESS_DIR = Path(__file__).resolve().parent.parent
-PYTHON = str(HARNESS_DIR / ".venv/bin/python")
+# テストを起動したPythonを子プロセスにも使う(デバッグEOP-DEBUG 3.1: 存在保証のない
+# Unix形式 .venv/bin/python の固定参照は環境・Windowsで起動前に失敗していた)
+PYTHON = sys.executable
 
 
 @pytest.mark.integration
