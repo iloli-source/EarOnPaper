@@ -6,7 +6,6 @@
 from pathlib import Path
 
 import pypdf
-import pytest
 
 from earpipe.contracts import QuantizedNote
 from earpipe.services.notate.tab import (

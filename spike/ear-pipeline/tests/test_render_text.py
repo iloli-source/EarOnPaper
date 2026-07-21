@@ -12,7 +12,6 @@ AAA(Arrange-Act-Assert)形式。描画の正しさ(OCR/目視)は親の別工程
 from pathlib import Path
 
 import pypdf
-import pytest
 
 from earpipe.contracts import QuantizedNote
 from earpipe.services.notate.chord import ChordSpan

@@ -17,3 +17,6 @@ spike/ear-pipeline/usertest/renders/
 spike/ear-pipeline/usertest/manifest.js
 spike/ear-pipeline/usertest/status.js
 tools/ai-ears/.coverage
+
+# workflowオーケストレーション用スクラッチ(絶対パス埋込・一回限り・非トラック)
+spike/ear-pipeline/.workflow-*.js
