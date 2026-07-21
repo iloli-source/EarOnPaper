@@ -6,6 +6,7 @@
 
 import argparse
 import json
+import sys
 import shutil
 import tempfile
 from dataclasses import asdict, replace
@@ -41,6 +42,9 @@ from earpipe.services.notate.analysis_dispatch import (
     default_analysis_path,
     dispatch_analysis,
 )
+from earpipe.services.notate.score_diff import diff_notes
+from earpipe.services.quality.client import run_compare
+from earpipe.services.stem.chunk import split_into_chunks
 from earpipe.services.notate.dispatch import (
     DispatchContext,
     default_out_path,
@@ -465,10 +469,35 @@ def main(argv: list[str] | None = None) -> int:
         help="drums(非音程)も採譜対象に含める(既定: 旋律ステムのみ)",
     )
 
+    # 長尺音源の分割(F-004): 無音優先で max-sec を超えないチャンクへ
+    pc = sub.add_parser("chunk", help="長尺音源を無音優先で複数wavに分割(F-004)")
+    pc.add_argument("input", help="入力音声(wav/mp3等)")
+    pc.add_argument("--out-dir", required=True, help="チャンクwavの出力先ディレクトリ")
+    pc.add_argument("--max-sec", type=float, default=600.0, help="1チャンクの最大秒(既定600)")
+
+    # 譜面差分(2つの採譜結果の意味論的差分): A/B の音源を採譜して音符列を比較
+    pd = sub.add_parser("diff", help="2音源を採譜して音符列の意味論的差分を出力")
+    pd.add_argument("a", help="基準側の音源(例: 正解/旧版)")
+    pd.add_argument("b", help="比較側の音源(例: 採譜結果/新版)")
+    pd.add_argument("-o", "--out", help="差分JSONの出力先(既定: 標準出力)")
+    pd.add_argument("--engine", choices=("auto", "mono", "poly"), default="auto", help="採譜エンジン")
+
+    # AIの耳による比較評価(外部ツール ai-ears/ears.py compare を起動)
+    pcmp = sub.add_parser("compare", help="AIの耳(ai-ears)で原音とtranscriptionを比較評価")
+    pcmp.add_argument("original", help="原音(参照)")
+    pcmp.add_argument("transcription", help="採譜結果(MusicXML/MIDI等)")
+    pcmp.add_argument("--report", help="評価レポートの出力先(任意)")
+
     args = p.parse_args(argv)
 
     if args.command == "separate-transcribe":
         return _run_separate_transcribe(args)
+    if args.command == "chunk":
+        return _run_chunk(args)
+    if args.command == "diff":
+        return _run_diff(args)
+    if args.command == "compare":
+        return _run_compare(args)
 
     out = args.output or str(Path(args.input).with_suffix(".musicxml"))
     formats = _parse_format_specs(args.formats, args.input)
@@ -532,6 +561,50 @@ def _run_separate_transcribe(args) -> int:
                       "model": sep.model, "stems": per_stem},
                      ensure_ascii=False, indent=2))
     return 0
+
+
+def _run_chunk(args) -> int:
+    """長尺音源分割(F-004): 無音優先で max-sec を超えないチャンク wav を書き出す。"""
+    import soundfile as sf
+
+    y, sr = load_audio(args.input)
+    chunks = split_into_chunks(y, sr, max_sec=args.max_sec)
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = []
+    for ch in chunks:
+        path = out_dir / f"chunk_{ch.index:03d}.wav"
+        sf.write(str(path), ch.samples, int(sr))
+        written.append({"index": ch.index, "path": str(path),
+                        "start_sec": round(ch.start_sec, 3), "end_sec": round(ch.end_sec, 3)})
+    print(json.dumps({"input": args.input, "out_dir": str(out_dir),
+                      "n_chunks": len(written), "chunks": written},
+                     ensure_ascii=False, indent=2))
+    return 0
+
+
+def _run_diff(args) -> int:
+    """譜面差分: A/B 両音源を採譜し、音符列の意味論的差分(diff_notes)を出力する。"""
+    ra = transcribe_file(args.a, engine=args.engine)
+    rb = transcribe_file(args.b, engine=args.engine)
+    diffs = diff_notes(ra["notes"], rb["notes"])
+    payload = {"a": args.a, "b": args.b, "diff_count": len(diffs), "diffs": diffs}
+    text = json.dumps(payload, ensure_ascii=False, indent=2)
+    if args.out:
+        Path(args.out).write_text(text + "\n", encoding="utf-8")
+    else:
+        print(text)
+    return 0
+
+
+def _run_compare(args) -> int:
+    """AIの耳(外部 ai-ears)で比較評価を実行し、その出力と終了コードを中継する。"""
+    proc = run_compare(args.original, args.transcription, args.report)
+    if proc.stdout:
+        print(proc.stdout, end="")
+    if proc.stderr:
+        print(proc.stderr, end="", file=sys.stderr)
+    return proc.returncode
 
 
 if __name__ == "__main__":

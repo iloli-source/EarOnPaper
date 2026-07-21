@@ -1,19 +1,17 @@
 # 孤立エクスポート allowlist (債務凍結ベースライン)
 #
 # ここに列挙したシンボルは __all__ にあるが実採譜フロー(pipeline.py)から未配線。
-# #109 で 85→5 まで消化(B-2a --analysis / B-2 汎用エミッタ並列結線 / #113 gp5結線)。
-# 残り5件は emitter の「単一副次出力」に収まらない意図的な保留(将来サブコマンド):
-#   - diff_notes            : 2つの譜面(正解/版違い vs 採譜結果)が必須
-#   - build_compare_command / run_compare : 外部ツール(MuseScore)比較起動が主
-#   - Chunk / split_into_chunks : 1波形を複数音声チャンクに分割
-# 1機能を結線したら該当行を削除すること(削除しないと check_orphan_exports.py が
-# stale として fail し、結線を機械的に記録する)。
-# 追跡Issue: #109(結線) / #111(本ゲート)
+# #109 で 85件 → **0件** まで完全消化(2026-07-21):
+#   - B-2a: 移動ド/度数/Nashville を `--analysis`
+#   - B-2 : 汎用エミッタ(自動発見レジストリ)で29モジュールを `--emit`
+#   - #113: gp5 を `--format` に再結線
+#   - 残subcommand型: chunk / diff / compare を CLI サブコマンド化
+#
+# 現在この allowlist は **空**(凍結中の孤立0)。空ベースラインの意味:
+# 新たに __all__ へ足したシンボルが pipeline から未到達なら即 CI fail する
+# (check_orphan_exports.py)。結線せず意図的に保留する場合のみ、理由コメント付きで
+# 1行1シンボルを追記すること。
+#
+# 追跡Issue: #109(結線・完了) / #111(本ゲート)
 #
 # 形式: 1行1シンボル。# 以降はコメント。
-
-Chunk
-build_compare_command
-diff_notes
-run_compare
-split_into_chunks

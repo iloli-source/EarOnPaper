@@ -9,7 +9,6 @@ AAA形式。
 import importlib.util
 from pathlib import Path
 
-import pytest
 
 _SPEC = importlib.util.spec_from_file_location(
     "check_orphan_exports",
@@ -55,15 +54,25 @@ def test_emitter_wired_symbols_are_not_orphans():
         assert sym not in orphans, f"{sym} は #109 B-2 エミッタで結線済みのはず"
 
 
-def test_known_unwired_features_are_detected_as_orphans():
-    """export 済みだが今も pipeline 未配線の機能は孤立として検出される。"""
+def test_subcommand_wired_symbols_are_not_orphans():
+    """#109 残オーファンを CLI サブコマンド(chunk/diff/compare)で結線した回帰。"""
     # Arrange / Act
     orphans, _ = orphan.find_orphans()
-    # Assert: 意図的に未結線のまま凍結中の代表(subcommand型)。
-    # diff_notes=2譜面必須 / run_compare=外部ツール / split_into_chunks=音声分割。
-    # これらは emitter の単一副次出力に収まらない(将来サブコマンド)。
-    for sym in ["diff_notes", "run_compare", "split_into_chunks"]:
-        assert sym in orphans, f"{sym} は孤立のはず(意図的に未結線・allowlist凍結)"
+    # Assert: diff→diff_notes / chunk→split_into_chunks / compare→run_compare
+    for sym in ["diff_notes", "split_into_chunks", "run_compare", "build_compare_command"]:
+        assert sym not in orphans, f"{sym} は #109 サブコマンドで結線済みのはず"
+
+
+def test_no_remaining_orphans():
+    """#109 完了: 実採譜フローから未到達の __all__ シンボルは残っていない(孤立0)。
+
+    「ユニット緑だが製品未反映」の債務を全消化した状態を固定する。以後どれかが
+    未到達に戻れば(結線を消す/新規に孤立を増やす)本テスト or ゲートが検知する。
+    """
+    # Arrange / Act
+    orphans, _ = orphan.find_orphans()
+    # Assert
+    assert orphans == set(), f"孤立が再発: {sorted(orphans)}"
 
 
 def test_baseline_passes_with_allowlist():
@@ -86,12 +95,9 @@ def test_allowlist_covers_all_current_orphans():
 
 
 def test_gate_fails_on_new_orphan(monkeypatch):
-    """allowlist から1件外すと new_orphan として検知され main() が 1 を返す(ゲート実効性)。"""
-    # Arrange: 現孤立から1件を allowlist 対象外にする
-    orphans, _ = orphan.find_orphans()
-    victim = sorted(orphans)[0]
-    full_allow = orphan.load_allowlist()
-    monkeypatch.setattr(orphan, "load_allowlist", lambda: full_allow - {victim})
+    """孤立0の今、合成した新規孤立を注入すると main() が 1 を返す(ゲート実効性)。"""
+    # Arrange: allowlist 未登録の合成孤立を find_orphans が返すよう差し替え
+    monkeypatch.setattr(orphan, "find_orphans", lambda: ({"__synthetic_orphan__"}, set()))
     # Act
     rc = orphan.main()
     # Assert
