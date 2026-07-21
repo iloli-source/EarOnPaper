@@ -56,7 +56,7 @@
 | F-077 | チューニング・カポ指定 | 1 | 🟡 | 基準ピッチ補正`tuning.py`済。カポ/staff-tuning印字は限定 |
 | F-078 | ギター/ベース奏法検出 | 2 | ✅ | `notate/technique.py` bend/slide/vibrato/hammer/pull(#73) |
 | F-081 | 調整合ピッチスペリング | 1 | ✅ | `notate/spelling.py:spell_midi()` KS法 |
-| F-108 | フィールド録音モード | 1 | ✅ | `stem/field*.py` 分類タグ+選択抽出 |
+| F-108 | フィールド録音モード | 1 | ✅ | `transcribe --field-mode` が `analyze_field`/`select_events` を実行し `field_report` を出力(既定フローに結線済)。なお下位公開API `classify_segment`/`gate_by_class` は本番未到達で allowlist 凍結(モード本体とは別) |
 | F-002 | 音質診断・警告 | 2(Should) | ✅ | `stem/diagnose.py` クリッピング/SNR/残響/帯域/3段階rating(#67) |
 
 ## 機能要件 Should/Could の主な未着手（抜粋）
