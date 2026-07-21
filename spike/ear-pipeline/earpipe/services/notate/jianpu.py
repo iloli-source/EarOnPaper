@@ -42,6 +42,7 @@
   完全には載らないため閾値で近似する。厳密な音価段組はテキストでは不可。
 """
 
+import math
 from types import MappingProxyType
 from typing import Final
 
@@ -58,6 +59,10 @@ SEMITONE_TO_DEGREE: Final[MappingProxyType[int, str]] = MappingProxyType(
 MIDDLE_OCTAVE: Final[int] = 5
 
 # 音価近似の閾値(dur_beats は四分音符=1.0 の倍率とみなす)。
+# 増時線の最大本数。巨大な音価異常値でも出力文字列を有界に保つ
+# (デバッグEOP-DEBUG 3.13: 旧実装は dur_beats に比例して " -" を無制限生成し、
+# 10^6拍級でメモリ急増・停止性問題になっていた)。最大32文字に制限する。
+_MAX_DURATION_DASHES: Final[int] = 16
 _DOTTED_HALF_MIN: Final[float] = 2.75   # 付点二分(3拍)以上の下限
 _HALF_MIN: Final[float] = 1.75          # 二分(2拍)相当の下限
 _DOTTED_QUARTER_MIN: Final[float] = 1.375  # 付点四分(1.5拍)相当の下限
@@ -105,12 +110,15 @@ def _duration_suffix(dur_beats: float) -> str:
     近似する(いずれもテキスト近似。厳密な段組は不可)。
     負値・NaN・0 以下は素の四分音符相当(空サフィックス)として安全側に倒す。
     """
-    # NaN(dur != dur)や非正値は四分音符相当とみなしクラッシュさせない。
-    if not (dur_beats > 0.0):
+    # 非有限値(NaN/±Infinity)と非正値は四分音符相当とみなしクラッシュさせない
+    # (デバッグEOP-DEBUG 3.12: 旧ガード `not (dur_beats > 0.0)` は +Infinity を通し、
+    # 後段の int(round(inf)) が OverflowError で簡譜生成を停止させていた。
+    # math.isfinite を先に確認して ±Infinity も安全側へ倒す)。
+    if not math.isfinite(dur_beats) or not (dur_beats > 0.0):
         return ""
     if dur_beats >= _DOTTED_HALF_MIN:
-        # 3拍以上: 増時線を (round(dur) - 1) 本後置して近似する。
-        dashes = max(int(round(dur_beats)) - 1, 1)
+        # 3拍以上: 増時線を (round(dur) - 1) 本後置。巨大音価でも上限で有界化(3.13)。
+        dashes = min(max(int(round(dur_beats)) - 1, 1), _MAX_DURATION_DASHES)
         return " -" * dashes
     if dur_beats >= _HALF_MIN:
         return " -"          # 二分音符(2拍)相当: 増時線1本

@@ -44,16 +44,23 @@ class TabNote:
 
 
 def fold_to_range(midi: int) -> tuple[int, int]:
-    """音域外のMIDIをオクターブ単位で 40..83 に収める。(収めたmidi, 移動オクターブ数)。"""
+    """音域外のMIDIをオクターブ単位で 40..83 に収める。(収めたmidi, 移動オクターブ数)。
+
+    必要オクターブ数を算術で一度に求めて定数時間で補正する(デバッグEOP-DEBUG 3.11:
+    旧実装は1オクターブずつのwhileループで、巨大MIDI値(±10^12級)で約833億回反復し
+    実用時間内に終了しないDoSになっていた)。
+    """
     lo, hi = TUNING_GUITAR[0], TUNING_GUITAR[-1] + MAX_FRET
-    shift = 0
     m = midi
-    while m < lo:
-        m += 12
-        shift += 1
-    while m > hi:
-        m -= 12
-        shift -= 1
+    shift = 0
+    if m < lo:
+        steps = (lo - m + 11) // 12
+        m += 12 * steps
+        shift += steps
+    elif m > hi:
+        steps = (m - hi + 11) // 12
+        m -= 12 * steps
+        shift -= steps
     return m, shift
 
 
@@ -138,7 +145,6 @@ def assign_frets(notes: Sequence[QuantizedNote]) -> list[TabNote]:
     def local_cost(p: int, assign: list[tuple[int, int]]) -> float:
         return _HEIGHT_COST * p + _FRET_COST * sum(f for _, f in assign)
 
-    prev_ps: list[int] = []
     for gi in range(n_groups):
         table = assigns[gi]
         if not table:  # フォールバック対象（後段処理）。ポジションは前を維持

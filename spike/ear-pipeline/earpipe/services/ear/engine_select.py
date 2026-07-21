@@ -129,7 +129,6 @@ def _mono_coverage(y: np.ndarray, sr: int, mono_events: list[PitchEvent]) -> flo
     if len(y) < _N_FFT:
         return 1.0
     rms = librosa.feature.rms(y=y, frame_length=_N_FFT, hop_length=_HOP)[0]
-    times = librosa.times_like(rms, sr=sr, hop_length=_HOP)
     thr = float(np.percentile(rms, _VOICED_PERCENTILE))
     voiced = rms >= thr
     voiced_dur = float(np.sum(voiced)) * (_HOP / sr)
