@@ -3,6 +3,7 @@ const { spawn } = require('child_process')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
+const { pathToFileURL } = require('url')
 const pu = require('./platform-utils')
 
 const ENGINE_DIR = path.resolve(__dirname, '../spike/ear-pipeline')
@@ -27,16 +28,18 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      // sandbox=false: preload が platform-utils(ローカルモジュール)を require するため。
-      // Electron 20+ は既定で sandbox:true となり、その場合 sandボックス化された preload は
-      // ローカル require が不可 →「module not found: ./platform-utils」で preload 全体が失敗し
-      // window.earpipe が一切公開されない(=アプリが動かない)。contextIsolation:true +
-      // nodeIntegration:false は維持しており、レンダラは隔離されたままで安全。
-      sandbox: false,
+      // sandbox:true(既定・セキュア)を維持する。preload はローカルモジュールを require
+      // しない(basenameForDisplay をインライン化し、file URL はメイン側で生成)ため、
+      // サンドボックス下でも壊れない。以前 sandbox 未指定で preload が
+      // require('./platform-utils') に失敗し window.earpipe が公開されなかった(#61)。
+      sandbox: true,
     },
   })
 
-  mainWindow.loadFile(path.join(__dirname, 'renderer/index.html'))
+  // E2E テスト起動時(env EARPAPER_E2E=1)のみ ?e2e=1 を付与。これにより
+  // renderer 側のテストフック(window.__earpipeTest)は本番では一切生えない。
+  const loadOpts = process.env.EARPAPER_E2E === '1' ? { query: { e2e: '1' } } : undefined
+  mainWindow.loadFile(path.join(__dirname, 'renderer/index.html'), loadOpts)
 }
 
 app.whenReady().then(createWindow)
@@ -195,9 +198,12 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '
         return
       }
       const paths = { musicxml: outMusicxml, pdf: outPdf, midi: outMidi }
+      // PDF埋め込み用の file URL はメイン側(node:url あり)で作る。これにより
+      // preload はローカルモジュール require が不要になり sandbox:true を維持できる。
+      const pdfUrl = pathToFileURL(outPdf).href
       // 3.8: 成果物の実体(存在・非空)を確認してから成功応答する
       ensureOutputs(paths)
-        .then(() => resolve({ ...result, paths }))
+        .then(() => resolve({ ...result, paths, pdfUrl }))
         .catch(reject)
     })
 

@@ -238,10 +238,10 @@ function showResult(result) {
   document.getElementById('stat-tuning').textContent =
     cents != null ? `${cents > 0 ? '+' : ''}${cents.toFixed(1)} cents` : '—'
 
-  // PDF表示
-  if (result.paths?.pdf) {
+  // PDF表示: file URL はメイン側が生成した result.pdfUrl を使う(preload は node:url 不要)
+  if (result.pdfUrl) {
     const embed = document.createElement('embed')
-    embed.src = window.earpipe.filePathToUrl(result.paths.pdf)
+    embed.src = result.pdfUrl
     embed.type = 'application/pdf'
     scorePanel.innerHTML = ''
     scorePanel.appendChild(embed)
@@ -297,5 +297,8 @@ document.getElementById('btn-error-back').addEventListener('click', () => {
 
 // E2Eテスト専用フック(#61): 実UIのドラッグ&ドロップは Electron の webUtils 経由でしか
 // 実パスを得られず Playwright から合成できないため、ドロップと同一の入口 startTranscribe を
-// テストから起動できるよう公開する。本番動作には影響しない(呼ばれなければ不活性)。
-window.__earpipeTest = { startTranscribe }
+// テストから起動できるよう公開する。**本番では絶対に露出しない**: main.js が E2E 起動時
+// (env EARPAPER_E2E=1)にのみ URL へ ?e2e=1 を付与し、その時だけフックを生やす。
+if (new URLSearchParams(window.location.search).get('e2e') === '1') {
+  window.__earpipeTest = { startTranscribe }
+}

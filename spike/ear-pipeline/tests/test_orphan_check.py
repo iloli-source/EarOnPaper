@@ -63,16 +63,21 @@ def test_subcommand_wired_symbols_are_not_orphans():
         assert sym not in orphans, f"{sym} は #109 サブコマンドで結線済みのはず"
 
 
-def test_no_remaining_orphans():
-    """#109 完了: 実採譜フローから未到達の __all__ シンボルは残っていない(孤立0)。
+def test_orphans_are_exactly_the_documented_allowlist():
+    """残る孤立は allowlist に理由付きで記録した意図的未結線のみ(ゲートの誠実性)。
 
-    「ユニット緑だが製品未反映」の債務を全消化した状態を固定する。以後どれかが
-    未到達に戻れば(結線を消す/新規に孤立を増やす)本テスト or ゲートが検知する。
+    緩い条件(b)で数字を「0」に見せる旧実装を撤廃し、関数は名前 import/直接呼び出し到達を
+    厳密要求するようにした(外部レビュー指摘)。その結果、実装済みだが本番未到達の関数は
+    正直に孤立として現れる。それらは allowlist に1件ずつ理由付きで凍結する。ここでは
+    「未登録の孤立が無い」かつ「allowlist に stale(実は配線済み)が無い」= 集合一致を固定する。
     """
     # Arrange / Act
     orphans, _ = orphan.find_orphans()
-    # Assert
-    assert orphans == set(), f"孤立が再発: {sorted(orphans)}"
+    allow = orphan.load_allowlist()
+    # Assert: 孤立集合と allowlist が完全一致(未登録もstaleも無い)
+    assert orphans == allow, (
+        f"未登録の孤立: {sorted(orphans - allow)} / stale(配線済みなのに残存): {sorted(allow - orphans)}"
+    )
 
 
 def test_baseline_passes_with_allowlist():

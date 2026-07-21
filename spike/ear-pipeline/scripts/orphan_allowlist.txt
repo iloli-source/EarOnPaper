@@ -1,17 +1,23 @@
 # 孤立エクスポート allowlist (債務凍結ベースライン)
 #
-# ここに列挙したシンボルは __all__ にあるが実採譜フロー(pipeline.py)から未配線。
-# #109 で 85件 → **0件** まで完全消化(2026-07-21):
-#   - B-2a: 移動ド/度数/Nashville を `--analysis`
-#   - B-2 : 汎用エミッタ(自動発見レジストリ)で29モジュールを `--emit`
-#   - #113: gp5 を `--format` に再結線
-#   - 残subcommand型: chunk / diff / compare を CLI サブコマンド化
+# __all__ にあるが実採譜フロー(pipeline.py)から「名前 import も直接呼び出しも
+# されない」= 到達不能な関数を凍結する。判定は check_orphan_exports.py:
+#   - 関数は「名前で import される」か「reachable なファイル内で name() と直接呼ばれる」
+#     ことを厳密に要求する(挙動の死は隠さない)。
+#   - 型/定数は wired 関数の返り値/引数として流通するため、定義モジュールが到達可能なら許容。
 #
-# 現在この allowlist は **空**(凍結中の孤立0)。空ベースラインの意味:
-# 新たに __all__ へ足したシンボルが pipeline から未到達なら即 CI fail する
-# (check_orphan_exports.py)。結線せず意図的に保留する場合のみ、理由コメント付きで
-# 1行1シンボルを追記すること。
+# ここに列挙する9件は「実装済み・単体テスト緑だが本番フロー未到達」の関数で、
+# **意図的に未結線**(デモ用/honest未実装/下位API)。各行に理由を明記する。
+# 価値が生じたら結線して該当行を削除すること(削除しないと stale として fail)。
 #
-# 追跡Issue: #109(結線・完了) / #111(本ゲート)
-#
-# 形式: 1行1シンボル。# 以降はコメント。
+# 追跡Issue: #109(結線) / #111(本ゲート)。形式: 1行1シンボル、# 以降コメント。
+
+available_formats     # 登録簿の全形式一覧を返す公開API。--format は get_format/dispatchable_keys で足り、列挙は本番未使用
+card_layout           # ビジュアルカードの下位レイアウトAPI。本番経路は結線済み render_visual_card
+classify_segment      # F-108 単一セグメント分類の公開API。field-mode 本番経路は別関数を使用
+demucs_available      # Demucs 実行可否チェック。separate-transcribe は実行時に失敗検出するため事前チェック未使用
+detect_sustain_audio  # 音声直接ペダル検出。SOTAでも困難でMVP未実装(NotImplementedError・honest)。note版 detect_sustain を結線済み
+gate_by_class         # F-108 分類ゲート。本番は select_events 経路。単体の下位公開API
+render_png_preview    # 記譜テキストのPNGプレビュー(デモ/確認用)。本番は五線譜PDF/テキスト出力
+to_vocal_midi         # ボーカルMIDI出力。UST(to_ust)は結線済み。vocal MIDI は別形式で本番未使用
+write_png_preview     # MusicXMLページのPNGプレビュー(デモ/確認用)。本番は write_pdf

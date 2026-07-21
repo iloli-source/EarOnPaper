@@ -31,9 +31,17 @@ async function triggerTranscribe(win, filePath) {
 }
 
 test('採譜→PDF表示→エクスポートUIが揃う(受入1・2・3)', async () => {
-  const app = await electron.launch({ args: [APP_DIR] })
+  const app = await electron.launch({ args: [APP_DIR], env: { ...process.env, EARPAPER_E2E: '1' } })
   try {
     const win = await app.firstWindow()
+
+    // #61回帰: sandbox:true 下で preload が正しくロードされ earpipe API が公開されていること。
+    // (以前 sandbox 既定で preload が require 失敗し window.earpipe が未公開=アプリ不動だった)
+    const api = await win.evaluate(() => (window.earpipe ? Object.keys(window.earpipe) : null))
+    expect(api).toEqual(
+      expect.arrayContaining(['transcribe', 'saveFile', 'getPathForFile', 'basenameForDisplay', 'onProgress'])
+    )
+
     // 起動直後は IDLE(ドロップ待ち)
     await expect(win.locator('#state-idle')).toHaveClass(/active/)
 
@@ -62,7 +70,7 @@ test('採譜→PDF表示→エクスポートUIが揃う(受入1・2・3)', asyn
 })
 
 test('不正入力でエラーメッセージが表示される(受入4)', async () => {
-  const app = await electron.launch({ args: [APP_DIR] })
+  const app = await electron.launch({ args: [APP_DIR], env: { ...process.env, EARPAPER_E2E: '1' } })
   try {
     const win = await app.firstWindow()
     // 存在しないファイルを渡す → エンジン起動前の検証で失敗する想定

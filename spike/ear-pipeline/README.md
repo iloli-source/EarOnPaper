@@ -132,8 +132,11 @@ record --out FILE [--seconds N] [--transcribe]  マイク/ライン録音（F-00
 rights                                   採譜物の権利ガイダンス（配布/販売前の著作権注意・F-073）
 ```
 
-> **実装機能はすべて CLI から到達可能**（孤立0・#109）。「ユニット緑だが未配線」を機械ゲート
-> （`scripts/check_orphan_exports.py`・CI常設）で検出し、85件の債務を全消化済み。
+> **注意**: `--format`/`--analysis`/`--emit` は**オプトインの副次出力**で、素の `transcribe` の
+> 既定出力(五線譜/MIDI/PDF/TAB)や GUI には反映されない(「CLIから到達可能」であって「既定挙動に
+> 組込み済み」ではない)。「ユニット緑だが本番未到達」を機械ゲート
+> （`scripts/check_orphan_exports.py`・CI常設）で厳密検出する。関数は名前import/直接呼び出しでの
+> 到達を要求し、実装済みだが未到達の関数は理由付きで allowlist(現9件)に凍結している。
 
 ---
 

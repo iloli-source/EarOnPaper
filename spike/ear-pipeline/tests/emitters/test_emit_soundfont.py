@@ -9,12 +9,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+import soundfile as sf
+
 from earpipe.contracts import QuantizedNote
 from earpipe.services.emitters import soundfont as soundfont_emitter
 from earpipe.services.emitters.base import EmitContext
 
 
-def test_soundfont_emit_writes_nonempty_audio(tmp_path: Path) -> None:
+def test_soundfont_emit_writes_audible_audio(tmp_path: Path) -> None:
+    """非空だけでなく **無音でない**(実際に音が合成された)ことを確認する。
+
+    「サイズ>0」のみだと無音WAVでも通ってしまう(偽成功)。読み返して十分な長さと
+    非ゼロ振幅を持つことを検証する。
+    """
     # Arrange: 最小の2音メロディ(実秒未指定→bpm格子秒へフォールバック)。
     notes = [
         QuantizedNote(start_beats=0.0, dur_beats=1.0, midi=60, confidence=1.0),
@@ -26,9 +34,11 @@ def test_soundfont_emit_writes_nonempty_audio(tmp_path: Path) -> None:
     # Act
     written = soundfont_emitter.emit(ctx, out_path)
 
-    # Assert: 実在する非空の音声ファイルが返る。
+    # Assert: 読み返して 0.5秒以上・非ゼロ振幅(無音でない)
     assert written.exists()
-    assert written.stat().st_size > 0
+    data, sr = sf.read(str(written))
+    assert len(data) >= sr * 0.5, "音声が短すぎる(合成されていない疑い)"
+    assert float(np.max(np.abs(data))) > 1e-3, "無音WAV(合成が失敗=偽成功)"
 
 
 def test_soundfont_emit_respects_sr_param(tmp_path: Path) -> None:

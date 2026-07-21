@@ -113,6 +113,12 @@ def compute_reachable() -> tuple[set[str], set[Path]]:
         except SyntaxError:
             continue
         for node in ast.walk(tree):
+            # 直接呼び出し name() を「使用」に含める(モジュール内ヘルパの到達性を捉える。
+            # 例: run_compare が同一モジュールの build_compare_command を呼ぶ)。
+            # obj.name() の属性呼び出しは含めない — 同名メソッドで本物の孤立関数を誤って
+            # 隠す(mask する)のを避けるため(孤立の見逃しは厳禁)。
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                used.add(node.func.id)
             if not isinstance(node, ast.ImportFrom):
                 continue
             mod = _resolve_from(node, f)
@@ -145,22 +151,45 @@ def load_allowlist() -> set[str]:
     return out
 
 
+def _is_function(deffile: Path | None, sym: str) -> bool:
+    """deffile 内で sym が関数(def/async def)として定義されているか。"""
+    if deffile is None or not deffile.exists():
+        return False
+    try:
+        tree = ast.parse(deffile.read_text(encoding="utf-8"))
+    except SyntaxError:
+        return False
+    return any(
+        isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == sym
+        for n in tree.body
+    )
+
+
 def find_orphans() -> tuple[set[str], set[str]]:
     """(現在の孤立集合, used集合) を返す。
 
-    シンボル S が配線済み(=非孤立)の条件は次のいずれか:
-      (a) S が import グラフ上で実際に import される名前である
-      (b) S の定義モジュールが pipeline から到達可能である
-          (到達モジュール内で定義・使用される型/定数/例外は間接的に配線済み)
+    **関数(=機能/挙動)は「実際に名前で import される」ことを厳密に要求する。**
+    以前は「定義モジュールが seen_files にあれば配線済み」という緩い条件があり、到達モジュールに
+    *同居するだけで一度も呼ばれない関数*(detect_sustain_audio / render_png_preview 等)まで
+    配線済みに数える抜け穴だった(外部レビュー指摘: emitter に import を1行足すだけで同モジュールの
+    __all__ を丸ごと孤立から隠せた)。よって関数は名前 import 必須に厳格化した。
+
+    型・定数(データ契約)は、定義モジュールが到達可能なら配線済みとみなす。これらは wired 関数の
+    返り値や引数として流通し、必ずしも名前 import されないため(例: validate_musicxml が返す
+    ValidationReport)。ただし「関数」はこの緩和の対象外(挙動の死は隠さない)。
     """
     used, seen_files = compute_reachable()
     orphans: set[str] = set()
     for b in BARRELS:
         defmap = _barrel_reexports(b)
         for sym in _all_symbols(b):
-            wired = sym in used or defmap.get(sym) in seen_files
-            if not wired:
-                orphans.add(sym)
+            if sym in used:
+                continue
+            deffile = defmap.get(sym)
+            # 型/定数のみモジュール到達で許容。関数は名前 import されないと孤立。
+            if deffile in seen_files and not _is_function(deffile, sym):
+                continue
+            orphans.add(sym)
     return orphans, used
 
 
