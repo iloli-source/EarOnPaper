@@ -14,7 +14,6 @@ CardLayout
 Chunk
 DYNAMIC_MARKS
 DroppedNote
-FORMAT_REGISTRY
 FitResult
 GENAI_PRESET
 GenaiPreset
@@ -22,7 +21,6 @@ HandoffManifest
 InstrumentGuess
 InstrumentProfile
 MELISMA_CONTINUATION
-OutputFormat
 PROFILES
 RemovedNote
 SustainSpan
@@ -33,7 +31,6 @@ adjust_musicxml_for
 align_lyrics
 apply_hints
 assign_fingering
-available_formats
 build_compare_command
 build_handoff_package
 card_layout
@@ -55,7 +52,6 @@ export_asset
 fit_to_profile
 fluidsynth_available
 genai_preprocess
-get_format
 get_profile
 gm_note_to_musicxml_unpitched
 import_asset
@@ -80,14 +76,9 @@ staff_to_tab_frets
 tab_to_staff
 time_stretch
 to_dynamic_marks
-to_jianpu
-to_leadsheet
-to_llm_text
 to_movable_do
 to_nashville
 to_roman
-to_ust
-to_vocal_midi
 transpose_key
 transpose_notes
 transpose_tab_out_of_range

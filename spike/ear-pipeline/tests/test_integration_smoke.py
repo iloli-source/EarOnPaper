@@ -62,3 +62,30 @@ def test_transcribe_musicxml_only_default(simple_wav, tmp_path):
     # Assert
     assert rc == 0
     assert out_xml.is_file() and out_xml.stat().st_size > 0
+
+
+def test_transcribe_dispatch_formats_are_generated(simple_wav, tmp_path):
+    """--format 経由の登録形式(#109 結線)が end-to-end で実生成される。
+
+    「export 済みだが未配線」を防ぐため、CLI から各形式が実際に出せることを固定する。
+    新形式を結線したら本ケースに key を追加すること。
+    """
+    # Arrange: lilypond は musicxml を要するため -o も渡す
+    wav_path, _melody, _bpm = simple_wav
+    out_xml = tmp_path / "o.musicxml"
+    keys = ["jianpu", "leadsheet", "ust", "abc", "lilypond"]
+    fmt_args = []
+    for k in keys:
+        fmt_args += ["--format", f"{k}={tmp_path / (k + '.out')}"]
+
+    # Act
+    rc = pipeline.main(
+        ["transcribe", str(wav_path), "-o", str(out_xml), "--engine", "mono", *fmt_args]
+    )
+
+    # Assert: 全形式が通常ファイルで非空
+    assert rc == 0
+    for k in keys:
+        out = tmp_path / f"{k}.out"
+        assert out.is_file(), f"{k} が生成されていない"
+        assert out.stat().st_size > 0, f"{k} が空"

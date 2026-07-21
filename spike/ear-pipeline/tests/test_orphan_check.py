@@ -20,7 +20,7 @@ _SPEC.loader.exec_module(orphan)
 
 
 def test_known_wired_symbols_are_not_orphans():
-    """pipeline.py が実際に import する記号は孤立と判定されない。"""
+    """pipeline.py が実際に import する中核記号は孤立と判定されない。"""
     # Arrange / Act
     orphans, used = orphan.find_orphans()
     # Assert: transcribe 本番経路が使う中核記号
@@ -29,13 +29,22 @@ def test_known_wired_symbols_are_not_orphans():
         assert sym in used
 
 
-def test_known_unwired_features_are_detected_as_orphans():
-    """export 済みだが pipeline 未配線の機能は孤立として検出される。"""
+def test_dispatch_wired_formats_are_not_orphans():
+    """#109 B-1 で --format 経由に結線した形式は孤立でない(結線の回帰固定)。"""
     # Arrange / Act
     orphans, _ = orphan.find_orphans()
-    # Assert: root-cause-analysis.md が挙げた孤立機能の代表
-    for sym in ["to_jianpu", "to_leadsheet", "to_movable_do", "write_guitarpro"]:
-        assert sym in orphans, f"{sym} は孤立のはず(未配線)"
+    # Assert: dispatch.py の adapter が呼ぶ producer
+    for sym in ["to_jianpu", "to_leadsheet", "to_ust", "to_llm_text"]:
+        assert sym not in orphans, f"{sym} は #109 B-1 で結線済みのはず"
+
+
+def test_known_unwired_features_are_detected_as_orphans():
+    """export 済みだが今も pipeline 未配線の機能は孤立として検出される。"""
+    # Arrange / Act
+    orphans, _ = orphan.find_orphans()
+    # Assert: まだ結線されていない孤立機能の代表(B-2 以降の対象)
+    for sym in ["to_movable_do", "write_guitarpro", "detect_drums", "assign_fingering"]:
+        assert sym in orphans, f"{sym} は孤立のはず(未配線・B-2対象)"
 
 
 def test_baseline_passes_with_allowlist():

@@ -30,6 +30,11 @@ from earpipe.services.notate import (
     write_pdf,
     write_tab_pdf,
 )
+from earpipe.services.notate.dispatch import (
+    DispatchContext,
+    default_out_path,
+    dispatch_format,
+)
 from earpipe.services.rhythm import (
     BPM_DEFAULT,
     GRID_PER_BEAT,
@@ -64,6 +69,7 @@ def transcribe_file(
     title: str | None = None,
     chord_diagrams: bool = True,
     stem: str | None = None,
+    formats: list[tuple[str, str]] | None = None,
 ) -> dict:
     """音声ファイルを採譜する。engine: auto(既定・#64) / mono(pYIN単音) / poly(basic-pitch多声)。
 
@@ -258,7 +264,49 @@ def transcribe_file(
             notes, bpm, out_tab_plain, title=title or Path(in_path_orig).stem,
             chord_diagrams=False,
         )
+
+    # 出力形式ディスパッチ(#109): FORMAT_REGISTRY 登録の非レガシー形式
+    # (簡譜/リードシート/GP5/UST/ABC/LilyPond)を --format 経由で生成する。
+    # 五線譜/MIDI/PDF/TAB は上の専用オプションが担うため対象外。
+    if formats:
+        ctx = DispatchContext(
+            notes=notes,
+            bpm=bpm,
+            title=effective_title,
+            musicxml_path=Path(out_musicxml) if out_musicxml else None,
+        )
+        outputs = []
+        for key, fmt_out in formats:
+            path, meta = dispatch_format(key, ctx, fmt_out)
+            outputs.append(
+                {
+                    "key": key,
+                    "path": str(path),
+                    "lossy": meta.lossy,
+                    "lossy_note": meta.lossy_note,  # F-104: lossy を隠さない
+                }
+            )
+        result["formats"] = outputs
+
     return result
+
+
+def _parse_format_specs(
+    specs: list[str] | None, input_path: str
+) -> list[tuple[str, str]] | None:
+    """``["jianpu=out.txt", "abc"]`` を ``[(key, out_path), ...]`` に解決する。
+
+    ``KEY=PATH`` 形式でパスを明示でき、省略時は登録簿の拡張子から既定パスを組む。
+    """
+    if not specs:
+        return None
+    parsed: list[tuple[str, str]] = []
+    for spec in specs:
+        key, sep, path = spec.partition("=")
+        key = key.strip()
+        out_path = path.strip() if sep else default_out_path(key, input_path)
+        parsed.append((key, out_path))
+    return parsed
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -305,6 +353,11 @@ def main(argv: list[str] | None = None) -> int:
         "--stem", choices=STEMS, default=None,
         help="ステム分離(F-003)して指定楽器だけを採譜(vocals/drums/bass/other・要Demucs)",
     )
+    pt.add_argument(
+        "--format", dest="formats", action="append", metavar="KEY[=PATH]", default=None,
+        help="追加の出力形式(F-104 FORMAT_REGISTRY・複数指定可)。例: --format jianpu=out.txt。"
+             "PATH省略時は '入力名.KEY.拡張子'。対応: jianpu/leadsheet/ust/abc/lilypond",
+    )
 
     # 楽器毎に分けて譜面化(F-003): 1回の分離で旋律ステム各々を別々の譜面にする
     ps = sub.add_parser("separate-transcribe", help="ステム分離して楽器毎に別々の譜面を生成")
@@ -322,6 +375,7 @@ def main(argv: list[str] | None = None) -> int:
         return _run_separate_transcribe(args)
 
     out = args.output or str(Path(args.input).with_suffix(".musicxml"))
+    formats = _parse_format_specs(args.formats, args.input)
     result = transcribe_file(
         args.input,
         out_musicxml=out,
@@ -337,6 +391,7 @@ def main(argv: list[str] | None = None) -> int:
         timing=args.timing,
         title=args.title,
         stem=args.stem,
+        formats=formats,
     )
     summary = {k: v for k, v in result.items() if k != "notes"}
     summary["output"] = out
