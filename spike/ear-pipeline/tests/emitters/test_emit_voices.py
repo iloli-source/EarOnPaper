@@ -7,6 +7,28 @@ from pathlib import Path
 from earpipe.contracts import QuantizedNote
 from earpipe.services.emitters import voices
 from earpipe.services.emitters.base import EmitContext
+from earpipe.services.notate.multivoice import separate_voices
+
+
+def test_separation_puts_skyline_top_and_preserves_all_notes():
+    """声部分離の正しさ: 上声(voices[0])が各時刻の最高音、かつ全音符が保存される。
+
+    パート数(>=2)だけでは分離の正しさを保証できない。三和音{60,64,67}を分離し、
+    上声に最高音67、下声に残り、合計音数が保存されることを検証する。
+    """
+    # Arrange: 同時発音の三和音
+    notes = [
+        QuantizedNote(start_beats=0.0, dur_beats=2.0, midi=67, confidence=0.9),
+        QuantizedNote(start_beats=0.0, dur_beats=2.0, midi=64, confidence=0.9),
+        QuantizedNote(start_beats=0.0, dur_beats=2.0, midi=60, confidence=0.9),
+    ]
+    # Act
+    result = separate_voices(notes, max_voices=3)
+    # Assert: 2声部以上、上声は最高音67(skyline)、全3音が保存
+    assert len(result) >= 2
+    assert max(n.midi for n in result[0]) == 67, "上声(voices[0])が最高音になっていない"
+    all_midis = sorted(n.midi for voice in result for n in voice)
+    assert all_midis == [60, 64, 67], f"音符が欠落/重複: {all_midis}"
 
 
 def _ctx(notes, **params):
