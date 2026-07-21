@@ -44,6 +44,7 @@ from earpipe.services.notate.analysis_dispatch import (
 )
 from earpipe.services.notate.score_diff import diff_notes
 from earpipe.services.quality.client import run_compare
+from earpipe.services.rights import rights_notice, rights_summary
 from earpipe.services.stem.chunk import split_into_chunks
 from earpipe.services.notate.dispatch import (
     DispatchContext,
@@ -488,6 +489,16 @@ def main(argv: list[str] | None = None) -> int:
     pcmp.add_argument("transcription", help="採譜結果(MusicXML/MIDI等)")
     pcmp.add_argument("--report", help="評価レポートの出力先(任意)")
 
+    # 権利ガイダンス表示(F-073): 採譜物の配布/販売前の著作権注意を教育的に示す
+    sub.add_parser("rights", help="採譜物の権利ガイダンス(配布/販売前の著作権注意)を表示")
+
+    # マイク/ライン録音入力(F-005): 録音してwav保存、任意でそのまま採譜(要 sounddevice)
+    pr = sub.add_parser("record", help="マイク/ラインから録音してwav保存(任意で採譜・要sounddevice)")
+    pr.add_argument("--out", required=True, help="録音wavの出力先")
+    pr.add_argument("--seconds", type=float, default=10.0, help="録音秒数(既定10)")
+    pr.add_argument("--samplerate", type=int, default=44100, help="サンプルレート(既定44100)")
+    pr.add_argument("--transcribe", action="store_true", help="録音後そのまま採譜する")
+
     args = p.parse_args(argv)
 
     if args.command == "separate-transcribe":
@@ -498,6 +509,11 @@ def main(argv: list[str] | None = None) -> int:
         return _run_diff(args)
     if args.command == "compare":
         return _run_compare(args)
+    if args.command == "rights":
+        print(rights_notice())
+        return 0
+    if args.command == "record":
+        return _run_record(args)
 
     out = args.output or str(Path(args.input).with_suffix(".musicxml"))
     formats = _parse_format_specs(args.formats, args.input)
@@ -524,6 +540,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     summary = {k: v for k, v in result.items() if k != "notes"}
     summary["output"] = out
+    summary["rights"] = rights_summary()  # F-073: 権利注意を成果物に添える
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 
@@ -605,6 +622,44 @@ def _run_compare(args) -> int:
     if proc.stderr:
         print(proc.stderr, end="", file=sys.stderr)
     return proc.returncode
+
+
+def _record_audio(seconds: float, samplerate: int):
+    """マイク/ラインから seconds 秒を録音し mono 波形(np.ndarray)を返す(F-005)。
+
+    sounddevice は任意依存(ハードウェア必須でCI不可)。未導入時は導入方法を示して
+    RuntimeError を送出する(黙って失敗しない)。
+    """
+    try:
+        import sounddevice as sd
+    except ImportError as e:  # 任意依存
+        raise RuntimeError(
+            "マイク録音には sounddevice が必要です: `pip install sounddevice`"
+            "(PortAudio が要る場合あり)。録音済みファイルなら `transcribe` を使ってください。"
+        ) from e
+    frames = int(float(seconds) * int(samplerate))
+    audio = sd.rec(frames, samplerate=int(samplerate), channels=1, dtype="float32")
+    sd.wait()
+    return audio.reshape(-1)
+
+
+def _run_record(args) -> int:
+    """マイク/ライン録音入力(F-005): 録音してwav保存、任意でそのまま採譜する。"""
+    import soundfile as sf
+
+    try:
+        audio = _record_audio(args.seconds, args.samplerate)
+    except RuntimeError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    sf.write(args.out, audio, int(args.samplerate))
+    result = {"out": args.out, "seconds": args.seconds, "samplerate": args.samplerate}
+    if args.transcribe:
+        out_xml = str(Path(args.out).with_suffix(".musicxml"))
+        r = transcribe_file(args.out, out_musicxml=out_xml)
+        result["transcribed"] = {"n_notes": r["n_notes"], "output": out_xml}
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
 
 
 if __name__ == "__main__":
