@@ -27,6 +27,12 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // sandbox=false: preload が platform-utils(ローカルモジュール)を require するため。
+      // Electron 20+ は既定で sandbox:true となり、その場合 sandボックス化された preload は
+      // ローカル require が不可 →「module not found: ./platform-utils」で preload 全体が失敗し
+      // window.earpipe が一切公開されない(=アプリが動かない)。contextIsolation:true +
+      // nodeIntegration:false は維持しており、レンダラは隔離されたままで安全。
+      sandbox: false,
     },
   })
 

@@ -294,3 +294,8 @@ document.getElementById('btn-copy-error').addEventListener('click', () => {
 document.getElementById('btn-error-back').addEventListener('click', () => {
   showState('idle')
 })
+
+// E2Eテスト専用フック(#61): 実UIのドラッグ&ドロップは Electron の webUtils 経由でしか
+// 実パスを得られず Playwright から合成できないため、ドロップと同一の入口 startTranscribe を
+// テストから起動できるよう公開する。本番動作には影響しない(呼ばれなければ不活性)。
+window.__earpipeTest = { startTranscribe }
