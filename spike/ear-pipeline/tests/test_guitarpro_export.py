@@ -184,3 +184,27 @@ def test_custom_tuning_is_written(tmp_path: Path) -> None:
 def test_default_tuning_is_standard() -> None:
     # Arrange / Act / Assert: 既定は標準EADGBE(低E→高E)
     assert TUNING_STANDARD == (40, 45, 50, 55, 59, 64)
+
+
+def test_non_representable_durations_do_not_crash(tmp_path) -> None:
+    """#113 回帰: GP5が単一ビートで表せない音価(2.5拍=5/8等)でも ValueError で落ちない。
+
+    Duration.fromTime は非表現音価で例外を投げる。_snap_ticks で直近の表現可能音価へ
+    丸めることで、任意の量子化長を安全に書き出せることを固定する(非空・valid)。
+    """
+    # Arrange: 2.5拍(=2400ticks, 従来クラッシュ)・付点系・三連端数を含む
+    notes = [
+        QuantizedNote(start_beats=0.0, dur_beats=2.5, midi=60, confidence=1.0),
+        QuantizedNote(start_beats=2.5, dur_beats=1.5, midi=64, confidence=1.0),
+        QuantizedNote(start_beats=4.0, dur_beats=0.33, midi=67, confidence=1.0),
+        QuantizedNote(start_beats=4.33, dur_beats=5.0, midi=62, confidence=1.0),
+    ]
+    out = tmp_path / "awkward.gp5"
+
+    # Act: 例外を投げないこと自体が回帰対象
+    written = write_guitarpro(notes, out, bpm=120)
+
+    # Assert: 非空 & 再パース可能(破損していない)
+    assert Path(written).stat().st_size > 0
+    song = guitarpro.parse(str(written))
+    assert len(song.tracks) >= 1

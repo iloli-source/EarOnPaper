@@ -73,6 +73,7 @@ def test_transcribe_dispatch_formats_are_generated(simple_wav, tmp_path):
     # Arrange: lilypond は musicxml を要するため -o も渡す
     wav_path, _melody, _bpm = simple_wav
     out_xml = tmp_path / "o.musicxml"
+    # gp5 は producer が拡張子を .gp5 に正規化するため別テストで検証(下記)。
     keys = ["jianpu", "leadsheet", "ust", "abc", "lilypond"]
     fmt_args = []
     for k in keys:
@@ -144,3 +145,26 @@ def test_transcribe_emit_outputs_are_generated(simple_wav, tmp_path):
     for out in (emit_validate, emit_simplify):
         assert out.is_file(), f"{out.name} が生成されていない"
         assert out.stat().st_size > 0, f"{out.name} が空"
+
+
+def test_transcribe_gp5_format_is_generated(simple_wav, tmp_path):
+    """#113 修正後: --format gp5 が e2e で非空の .gp5 を実生成する(クラッシュしない)。
+
+    write_guitarpro は出力拡張子を .gp5 に正規化するため、要求パスではなく
+    生成された .gp5 ファイルの存在・非空を確認する。
+    """
+    # Arrange
+    wav_path, _melody, _bpm = simple_wav
+    out_xml = tmp_path / "g.musicxml"
+    gp5_out = tmp_path / "out.gp5"
+
+    # Act
+    rc = pipeline.main(
+        ["transcribe", str(wav_path), "-o", str(out_xml), "--engine", "mono",
+         "--format", f"gp5={gp5_out}"]
+    )
+
+    # Assert: .gp5 が通常ファイルで非空
+    assert rc == 0
+    assert gp5_out.is_file(), "gp5 が生成されていない"
+    assert gp5_out.stat().st_size > 0, "gp5 が空"

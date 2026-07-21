@@ -26,6 +26,7 @@ from earpipe.contracts import QuantizedNote
 from earpipe.services.notate.chord import estimate_chords
 from earpipe.services.notate.engrave import render_svg_pages
 from earpipe.services.notate.format_registry import OutputFormat, get_format
+from earpipe.services.notate.guitarpro_export import write_guitarpro
 from earpipe.services.notate.jianpu import to_jianpu
 from earpipe.services.notate.leadsheet import to_leadsheet
 from earpipe.services.notate.llm_export import to_llm_text
@@ -88,15 +89,19 @@ def _adapt_lilypond(ctx: DispatchContext, out_path: str | Path) -> Path:
     return _write_text("\n".join(pages), out_path)
 
 
+def _adapt_gp5(ctx: DispatchContext, out_path: str | Path) -> Path:
+    """Guitar Pro 5(.gp5)。#113 で非表現音価クラッシュを修正済み。"""
+    return write_guitarpro(ctx.notes, out_path, bpm=ctx.bpm, title=ctx.title)
+
+
 # key -> adapter。登録簿の非レガシー形式のみ(レガシーは pipeline の専用オプション)。
-# gp5(write_guitarpro)は producer が2拍音符等でクラッシュするため未対応(別Issue)。
-# status="stable" だが実際は e2e で落ちる — 結線せず allowlist に留める。
 _ADAPTERS: dict[str, Callable[[DispatchContext, "str | Path"], Path]] = {
     "jianpu": _adapt_jianpu,
     "leadsheet": _adapt_leadsheet,
     "ust": _adapt_ust,
     "abc": _adapt_abc,
     "lilypond": _adapt_lilypond,
+    "gp5": _adapt_gp5,  # #113 修正後に結線
 }
 
 

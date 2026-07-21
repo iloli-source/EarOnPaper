@@ -220,12 +220,38 @@ def _fill_voice(track, events, n_measures: int) -> None:
             voice.beats.append(_make_rest_beat(voice, float(_BEATS_PER_MEASURE)))
 
 
+# GP5が単一ビートで表せる音価のティック集合(全音符〜64分 + 各付点)。
+# Duration.fromTime は 5/8 拍等の非表現音価で ValueError を投げる(#113)。
+# 任意の量子化長を、ここに snap してから渡すことでクラッシュを避ける。
+def _representable_ticks() -> list[int]:
+    whole = _QUARTER_TIME * 4  # 全音符 = 3840
+    ticks: set[int] = set()
+    for value in (1, 2, 4, 8, 16, 32, 64):  # 全/2分/4分/8分/16/32/64
+        base = whole // value
+        ticks.add(base)
+        ticks.add(base * 3 // 2)  # 付点
+    return sorted(t for t in ticks if t >= _MIN_TICKS)
+
+
+_REPRESENTABLE_TICKS = _representable_ticks()
+
+
+def _snap_ticks(ticks: int) -> int:
+    """ticks を GP5 が表せる最大の音価(≤ticks)に丸める(小節超過を避ける round-down)。
+
+    最短音価未満は最短へクランプ。全て未満なら最小の表現可能音価を返す。
+    """
+    ticks = max(_MIN_TICKS, ticks)
+    candidates = [t for t in _REPRESENTABLE_TICKS if t <= ticks]
+    return candidates[-1] if candidates else _REPRESENTABLE_TICKS[0]
+
+
 def _duration_for(dur_beats: float):
-    """拍長(四分音符=1.0)を最寄りのGP5 Durationに変換する。"""
+    """拍長(四分音符=1.0)を最寄りのGP5 Durationに変換する(#113: 非表現音価も安全に丸める)。"""
     import guitarpro.models as gpm
 
-    ticks = max(_MIN_TICKS, int(round(dur_beats * _QUARTER_TIME)))
-    return gpm.Duration.fromTime(ticks)
+    raw = max(_MIN_TICKS, int(round(dur_beats * _QUARTER_TIME)))
+    return gpm.Duration.fromTime(_snap_ticks(raw))
 
 
 def _make_rest_beat(voice, dur_beats: float):

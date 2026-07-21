@@ -59,10 +59,10 @@ def test_known_unwired_features_are_detected_as_orphans():
     """export 済みだが今も pipeline 未配線の機能は孤立として検出される。"""
     # Arrange / Act
     orphans, _ = orphan.find_orphans()
-    # Assert: 意図的に未結線のまま凍結中の代表(subcommand型3件 + #113のgp5)。
-    # diff_notes=2譜面必須 / run_compare=外部ツール / split_into_chunks=音声分割 /
-    # write_guitarpro=producer欠陥(#113)。これらは emitter 単一副次出力に収まらない。
-    for sym in ["diff_notes", "run_compare", "split_into_chunks", "write_guitarpro"]:
+    # Assert: 意図的に未結線のまま凍結中の代表(subcommand型)。
+    # diff_notes=2譜面必須 / run_compare=外部ツール / split_into_chunks=音声分割。
+    # これらは emitter の単一副次出力に収まらない(将来サブコマンド)。
+    for sym in ["diff_notes", "run_compare", "split_into_chunks"]:
         assert sym in orphans, f"{sym} は孤立のはず(意図的に未結線・allowlist凍結)"
 
 

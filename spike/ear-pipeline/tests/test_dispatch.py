@@ -29,7 +29,7 @@ def _ctx() -> DispatchContext:
     return DispatchContext(notes=_NOTES, bpm=120.0, title="test")
 
 
-@pytest.mark.parametrize("key", ["jianpu", "leadsheet", "ust", "abc"])
+@pytest.mark.parametrize("key", ["jianpu", "leadsheet", "ust", "abc", "gp5"])
 def test_dispatch_generates_nonempty_file(key, tmp_path):
     # Arrange
     out = tmp_path / f"{key}.out"
@@ -48,10 +48,8 @@ def test_unknown_key_raises_keyerror(tmp_path):
 
 
 def test_legacy_or_unwired_key_raises_valueerror(tmp_path):
-    """登録簿にはあるがディスパッチ非対応(gp5=producer欠陥/レガシーmusicxml)は ValueError。"""
+    """登録簿にはあるがディスパッチ非対応(レガシー musicxml は専用オプション)は ValueError。"""
     # Arrange / Act / Assert
-    with pytest.raises(ValueError):
-        dispatch_format("gp5", _ctx(), tmp_path / "x.gp5")
     with pytest.raises(ValueError):
         dispatch_format("musicxml", _ctx(), tmp_path / "x.musicxml")
 
@@ -75,5 +73,5 @@ def test_default_out_path_uses_registry_ext(tmp_path):
 
 
 def test_dispatchable_keys_are_stable():
-    # Assert: 現在の対応形式(gp5 は producer 欠陥のため除外)
-    assert dispatchable_keys() == ["abc", "jianpu", "leadsheet", "lilypond", "ust"]
+    # Assert: 現在の対応形式(gp5 は #113 修正後に結線)
+    assert dispatchable_keys() == ["abc", "gp5", "jianpu", "leadsheet", "lilypond", "ust"]
