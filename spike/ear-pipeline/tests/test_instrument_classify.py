@@ -12,7 +12,6 @@ import numpy as np
 import pytest
 
 from earpipe.services.ear.instrument_classify import (
-    InstrumentGuess,
     classify_instrument,
 )
 

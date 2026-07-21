@@ -113,13 +113,15 @@ def process_song(in_path: Path, index: int, force: bool) -> dict:
         print(f"[skip] {name}（処理済み。やり直しは --force）")
         return json.loads(meta_path.read_text())
 
-    print(f"[run ] {title}: poly採譜を開始...")
+    print(f"[run ] {title}: auto採譜を開始...")
     _write_status(title, "耳で音を拾っています（採譜中）", 10)
     fallback_note = None
     try:
-        summary, elapsed = transcribe(in_path, engine="poly", title=title)
+        # stale flag修正(#64反映): poly強制は単旋律にオクターブ二重音を出す。
+        # 音源に応じてmono/polyを自動選択するautoを使う(かえるのうた二重音の再発防止)。
+        summary, elapsed = transcribe(in_path, engine="auto", title=title)
     except (RuntimeError, json.JSONDecodeError, subprocess.TimeoutExpired) as e:
-        fallback_note = f"polyが失敗したためmonoで再実行: {e}"
+        fallback_note = f"autoが失敗したためmonoで再実行: {e}"
         print(f"[warn] {title}: {fallback_note}")
         summary, elapsed = transcribe(in_path, engine="mono", title=title)
 

@@ -5,7 +5,6 @@
 """
 
 import numpy as np
-import pytest
 
 from earpipe.contracts import PitchEvent
 from earpipe.services.ear.engine_select import (
