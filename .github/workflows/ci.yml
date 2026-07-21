@@ -38,6 +38,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+          python -m pip install ruff==0.15.22
+
+      - name: Lint (dead code / unused imports)
+        working-directory: spike/ear-pipeline
+        run: ruff check --select F earpipe/
+
+      - name: Orphan export gate (実装したが未配線の機能を検出)
+        working-directory: spike/ear-pipeline
+        run: python scripts/check_orphan_exports.py
 
       - name: Run tests
         working-directory: spike/ear-pipeline
