@@ -27,10 +27,9 @@ def test_emit_writes_nonempty_region_wav(simple_wav, tmp_path):
     # Act
     result = region.emit(ctx, out_path)
 
-    # Assert
+    # Assert: 切り出し長が [start, end) = 1.5秒 に一致する。非空だけでは crop の正しさを
+    # 保証できないため、名前通り「指定区間を切り出した」ことを実測で固定する。
     assert result == out_path
-    assert out_path.exists()
-    assert out_path.stat().st_size > 0
     data, sr = sf.read(str(out_path))
-    assert len(data) > 0
-    assert sr > 0
+    duration = len(data) / sr
+    assert abs(duration - 1.5) < 0.05, f"切り出し長が想定と違う: {duration:.3f}s (期待 1.5s)"

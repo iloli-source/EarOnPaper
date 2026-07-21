@@ -18,20 +18,20 @@ def _shifted_notes(offset: float = 0.06) -> list[QuantizedNote]:
     ]
 
 
-def test_emit_writes_non_empty_musicxml(tmp_path: Path) -> None:
-    # Arrange
-    ctx = EmitContext(notes=_shifted_notes(), bpm=120.0, title="テスト曲",
-                      params={"grid": "4"})
+def test_emit_preserves_notes_and_reports_correction(tmp_path: Path) -> None:
+    # Arrange: 6音の系統ずれ列
+    notes = _shifted_notes()
+    ctx = EmitContext(notes=notes, bpm=120.0, title="テスト曲", params={"grid": "4"})
     out = tmp_path / f"out.{rebar_emitter.EXT}"
 
     # Act
-    result = rebar_emitter.emit(ctx, out)
+    rebar_emitter.emit(ctx, out)
 
-    # Assert
-    assert result == out
-    assert out.exists()
-    assert out.stat().st_size > 0
-    assert "<note" in out.read_text(encoding="utf-8")
+    # Assert: 入力音を1つも落としていない(小節線での連桁分割で数は増えうるが減らない)
+    xml = out.read_text(encoding="utf-8")
+    assert xml.count("<note") >= len(notes), f"音符が欠落: {xml.count('<note')} < {len(notes)}"
+    # リバーリングが実行され、信頼度が譜面タイトルに正直に注記されている(補正ロジックが走った証跡)
+    assert "リバーリング" in xml and "信頼度" in xml
 
 
 def test_emit_default_params(tmp_path: Path) -> None:
