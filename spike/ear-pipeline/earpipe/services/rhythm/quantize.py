@@ -188,6 +188,25 @@ def _system_total(
     return _grid_fit(iois, bpm, grid_per_beat) * subdiv * prior
 
 
+def _best_system(
+    iois: np.ndarray,
+    grid_per_beat: int,
+    subdiv_centers: tuple[float, ...],
+    bpm_min: float,
+    bpm_max: float,
+) -> tuple[float | None, float]:
+    """指定格子系を全BPMスキャンし (bpm, total) を返す。2分系/3分系を同一ロジックで
+    対称評価するためのヘルパ。格子で説明できない(最良fit<MIN_FIT)なら (None, 0.0)。"""
+    bpms = np.arange(bpm_min, bpm_max + 0.25, 0.5)
+    fits = {float(b): _grid_fit(iois, float(b), grid_per_beat) for b in bpms}
+    best_fit = max(fits.values())
+    if best_fit < MIN_FIT:
+        return None, 0.0
+    band = [b for b, f in fits.items() if f >= best_fit - FIT_BAND]
+    bpm = max(band, key=lambda b: _system_total(iois, b, grid_per_beat, subdiv_centers))
+    return bpm, _system_total(iois, bpm, grid_per_beat, subdiv_centers)
+
+
 def estimate_grid(
     events: list[PitchEvent],
     bpm_min: float = BPM_MIN,
@@ -212,28 +231,32 @@ def estimate_grid(
     if iois is None:
         return BPM_DEFAULT, GRID_PER_BEAT
 
-    # 2分系: 既存 estimate_tempo の選択をそのまま使う(挙動不変)
-    bpm_d = estimate_tempo(events, bpm_min, bpm_max)
-    total_d = _system_total(iois, bpm_d, GRID_PER_BEAT, (0.25, 0.5, 1.0))
+    # 2分系: 調整済み estimate_tempo と 全BPMスキャン の良い方を代表にする。
+    # 旧実装は estimate_tempo の単一値だけを再採点し、3分系だけ全スキャンで最良点を
+    # 選ぶ非対称評価だった(テンポのオクターブ外しで2分系が過小評価→三連へ誤爆)。
+    centers_d = (0.25, 0.5, 1.0)
+    bpm_e = estimate_tempo(events, bpm_min, bpm_max)
+    total_e = _system_total(iois, bpm_e, GRID_PER_BEAT, centers_d)
+    bpm_s, total_s = _best_system(iois, GRID_PER_BEAT, centers_d, bpm_min, bpm_max)
+    if bpm_s is not None and total_s > total_e:
+        bpm_d, total_d = bpm_s, total_s
+    else:
+        bpm_d, total_d = bpm_e, total_e
 
-    # 3分系: 同じ機構を3連格子で探索
-    bpms = np.arange(bpm_min, bpm_max + 0.25, 0.5)
-    fits3 = {float(b): _grid_fit(iois, float(b), TRIPLET_GRID_PER_BEAT) for b in bpms}
-    best3 = max(fits3.values())
-    if best3 < MIN_FIT:
+    # 3分系: 同一ロジック(全スキャン)で評価
+    bpm_t, total_t = _best_system(
+        iois, TRIPLET_GRID_PER_BEAT, (1.0 / 3.0, 2.0 / 3.0, 1.0), bpm_min, bpm_max
+    )
+    if bpm_t is None:  # 3分系は格子で説明できない → 2分系
         return bpm_d, GRID_PER_BEAT
-    band3 = [b for b, f in fits3.items() if f >= best3 - FIT_BAND]
-    bpm_t = max(
-        band3,
-        key=lambda b: _system_total(
-            iois, b, TRIPLET_GRID_PER_BEAT, (1.0 / 3.0, 2.0 / 3.0, 1.0)
-        ),
-    )
-    total_t = TRIPLET_PENALTY * _system_total(
-        iois, bpm_t, TRIPLET_GRID_PER_BEAT, (1.0 / 3.0, 2.0 / 3.0, 1.0)
-    )
 
-    if total_t > total_d:
+    # 三連採用: オッカム減点つきで total_t が total_d を上回るとき(従来semantics)。
+    # 注(2026-07-23 実測): fit/evidence ベースの追加判別ゲートは試作したが、実音声では
+    # 本物三連(Romanze の三連特有位置集中=0.22)を偽三連(furusato=0.50)より低く評価し、
+    # Romanze を2分系へ退行させる欠陥があった(MIDIベースのテストは通るが音声で退行=偽成功)。
+    # 誤三連(かえるのうた等)の根本原因はテンポのオクターブ外し＋オンセットジッタで、
+    # 格子選択層の後付け判別では解けない(accuracy-improvement-roadmap.md 参照)。
+    if TRIPLET_PENALTY * total_t > total_d:
         return bpm_t, TRIPLET_GRID_PER_BEAT
     return bpm_d, GRID_PER_BEAT
 

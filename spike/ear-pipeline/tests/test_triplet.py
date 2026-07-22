@@ -97,3 +97,17 @@ class TestBackwardCompat:
         bpm = estimate_tempo(events_from_melody(MELODY_SIMPLE, 120))
         assert isinstance(bpm, float)
         assert abs(bpm - 120) <= 2
+
+
+class TestSymmetricGridEval:
+    """2分系/3分系の対称評価の回帰(2026-07-23)。旧実装は2分系だけ estimate_tempo の
+    単一値を再採点し、3分系は全スキャン最良を使う非対称評価だった(テンポのオクターブ
+    外しで2分系が過小評価→三連へ誤爆)。両系を _best_system で対称に評価する。"""
+
+    def test_best_system_returns_bpm_and_total(self):
+        from earpipe.services.rhythm.quantize import (
+            _best_system, _prep_iois, BPM_MIN, BPM_MAX,
+        )
+        iois = _prep_iois(triplet_melody_events(100))
+        bpm, total = _best_system(iois, 3, (1 / 3, 2 / 3, 1.0), BPM_MIN, BPM_MAX)
+        assert bpm is not None and total > 0.0
