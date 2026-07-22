@@ -237,6 +237,49 @@ html, body {
   position: relative;
   overflow: hidden;
   gap: 0;
+  /* 深宇宙: 中央にほのかな星雲グロー + 外周へ暗く沈むグラデーション */
+  background:
+    radial-gradient(circle at 50% 50%, oklch(38% 0.13 285 / 0.28) 0%, transparent 42%),
+    radial-gradient(circle at 50% 50%, oklch(16% 0.05 270) 0%, oklch(9% 0.03 265) 55%, oklch(5% 0.02 260) 100%);
+}
+
+/* 星空レイヤー */
+.starfield {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.star {
+  position: absolute;
+  border-radius: 50%;
+  background: white;
+  opacity: 0.7;
+  animation: twinkle var(--tw, 3s) ease-in-out var(--twd, 0s) infinite;
+  will-change: opacity, transform;
+}
+@keyframes twinkle {
+  0%, 100% { opacity: 0.15; transform: scale(0.85); }
+  50%      { opacity: 1;    transform: scale(1.15); }
+}
+
+/* 中央の特異点グロー(音符が吸い込まれる先。ゆっくり脈動) */
+.space-core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 260px;
+  height: 260px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  background: radial-gradient(circle, oklch(72% 0.16 285 / 0.28) 0%, oklch(60% 0.2 300 / 0.12) 35%, transparent 70%);
+  filter: blur(4px);
+  animation: core-pulse 4.5s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+@keyframes core-pulse {
+  0%, 100% { opacity: 0.55; transform: translate(-50%, -50%) scale(0.92); }
+  50%      { opacity: 0.9;  transform: translate(-50%, -50%) scale(1.08); }
 }
 
 /* 飛んでくる音符（背景） */
@@ -252,7 +295,13 @@ html, body {
   top: 50%;
   font-size: 30px;
   line-height: 1;
-  animation: fly-in var(--dur) var(--del) ease-in infinite;
+  /* 収束の速さはステージ毎に上がる。親(#notes-bg)の --speed を掛けて短縮する
+     (--speed が小さいほど収束が速い)。既定1.0。 */
+  animation-name: fly-in;
+  animation-duration: calc(var(--dur) * var(--speed, 1));
+  animation-delay: var(--del);
+  animation-timing-function: ease-in;
+  animation-iteration-count: infinite;
   will-change: transform, opacity;
 }
 
@@ -669,6 +718,88 @@ html, body {
 }
 
 .btn-back:hover { background: oklch(68% 0.21 250 / 0.18); }
+
+/* 楽器スイッチャ */
+.instrument-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.instr-btn {
+  flex: 1 1 auto;
+  min-width: 64px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--duration-fast), background var(--duration-fast), color var(--duration-fast);
+}
+.instr-btn:hover { border-color: var(--accent-dim); color: var(--text); }
+.instr-btn.active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: oklch(68% 0.21 250 / 0.14);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* 表示切替(五線譜/TAB) */
+.view-toggle {
+  display: flex;
+  gap: 6px;
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+.view-btn {
+  flex: 1;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+.view-btn:hover { color: var(--text); }
+.view-btn.active { background: var(--accent); color: white; }
+
+/* 詳細設定(任意) */
+.opt-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.opt-label {
+  width: 40px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.opt-select {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.opt-select:focus { outline: none; border-color: var(--accent); }
+.opt-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
 
 /* スクロールバー */
 ::-webkit-scrollbar { width: 6px; }

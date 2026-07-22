@@ -35,7 +35,9 @@
 
       <!-- PROCESSING: 処理中 -->
       <div id="state-processing" class="state">
-        <!-- 背景: 音符が集まるアニメーション -->
+        <!-- 背景: 宇宙(星空)＋中央に吸い込まれる音符 -->
+        <div class="starfield" id="starfield" aria-hidden="true"></div>
+        <div class="space-core" aria-hidden="true"></div>
         <div class="notes-bg" id="notes-bg" aria-hidden="true"></div>
 
         <!-- 前面: ステージ情報 -->
@@ -68,6 +70,21 @@
           </div>
         </div>
         <div class="sidebar">
+          <!-- 楽器スイッチャ: 分離で抽出できた楽器を切り替える -->
+          <div class="result-card">
+            <div class="result-card-title">楽器</div>
+            <div class="instrument-switch" id="instrument-switch"></div>
+          </div>
+
+          <!-- 表示切替(ギターのみ: 五線譜/TAB) -->
+          <div class="result-card" id="view-toggle-card" hidden>
+            <div class="result-card-title">表示</div>
+            <div class="view-toggle" id="view-toggle">
+              <button class="view-btn active" data-view="tab">TAB譜</button>
+              <button class="view-btn" data-view="staff">五線譜</button>
+            </div>
+          </div>
+
           <div class="result-card">
             <div class="result-card-title">採譜結果</div>
             <div class="result-stat">
@@ -82,10 +99,6 @@
               <span class="result-stat-label">エンジン</span>
               <span class="result-stat-value" id="stat-engine">—</span>
             </div>
-            <div class="result-stat">
-              <span class="result-stat-label">チューニング</span>
-              <span class="result-stat-value" id="stat-tuning">—</span>
-            </div>
           </div>
 
           <div class="result-card">
@@ -97,30 +110,51 @@
               <button class="btn-export" id="btn-export-tab">
                 <span class="btn-export-icon">🎸</span>TAB譜（PDF）
               </button>
-              <!-- 一旦非表示(2026-07-22 ユーザー指示): まずは五線譜とTAB譜のみ表示。戻す時は hidden を外す -->
-              <button class="btn-export" id="btn-export-musicxml" hidden>
-                <span class="btn-export-icon">🎼</span>MusicXML
-              </button>
-              <button class="btn-export" id="btn-export-midi" hidden>
+              <button class="btn-export" id="btn-export-midi">
                 <span class="btn-export-icon">🎹</span>MIDI
               </button>
             </div>
           </div>
 
-          <!-- 一旦非表示(2026-07-22 ユーザー指示): まずは五線譜とTAB譜のみ。戻す時は hidden を外す -->
-          <div class="result-card" hidden>
-            <div class="result-card-title">詳細エクスポート（音楽家向け）</div>
-            <div class="export-buttons" id="extra-export-buttons">
-              <button class="btn-export" data-extra="jianpu"><span class="btn-export-icon">🔢</span>簡譜（数字譜）</button>
-              <button class="btn-export" data-extra="leadsheet"><span class="btn-export-icon">🎵</span>リードシート</button>
-              <button class="btn-export" data-extra="roman"><span class="btn-export-icon">🔟</span>度数（ローマ数字）</button>
-              <button class="btn-export" data-extra="nashville"><span class="btn-export-icon">#️⃣</span>Nashville</button>
-              <button class="btn-export" data-extra="movable_do"><span class="btn-export-icon">🎶</span>移動ド</button>
-              <button class="btn-export" data-extra="gp5"><span class="btn-export-icon">🎸</span>Guitar Pro (GP5)</button>
-              <button class="btn-export" data-extra="ust"><span class="btn-export-icon">🎤</span>UST（歌声合成）</button>
-              <button class="btn-export" data-extra="abc"><span class="btn-export-icon">🅰️</span>ABC 記譜</button>
+          <!-- 詳細設定(任意): 分かる人はBPM/拍子/キーを指定すると採譜精度が上がる -->
+          <div class="result-card">
+            <div class="result-card-title">詳細設定（任意）</div>
+            <div class="opt-row">
+              <label class="opt-label">BPM</label>
+              <select class="opt-select" id="opt-bpm">
+                <option value="">自動</option>
+                <option value="30-60">30–60</option>
+                <option value="60-90">60–90</option>
+                <option value="90-120">90–120</option>
+                <option value="120-240">120以上</option>
+              </select>
             </div>
-            <div class="extra-export-status" id="extra-export-status" aria-live="polite"></div>
+            <div class="opt-row">
+              <label class="opt-label">拍子</label>
+              <select class="opt-select" id="opt-beat">
+                <option value="">自動</option>
+                <option value="4/4">4/4</option>
+                <option value="3/4">3/4</option>
+                <option value="2/4">2/4</option>
+              </select>
+            </div>
+            <div class="opt-row">
+              <label class="opt-label">キー</label>
+              <select class="opt-select" id="opt-key">
+                <option value="">自動</option>
+                <option>C</option><option>C#</option><option>D</option><option>D#</option>
+                <option>E</option><option>F</option><option>F#</option><option>G</option>
+                <option>G#</option><option>A</option><option>A#</option><option>B</option>
+              </select>
+              <select class="opt-select" id="opt-mode">
+                <option value="major">major</option>
+                <option value="minor">minor</option>
+              </select>
+            </div>
+            <button class="btn-export" id="btn-reapply">
+              <span class="btn-export-icon">🔁</span>この設定で採譜し直す
+            </button>
+            <div class="opt-hint">未選択の項目は自動検出のままです</div>
           </div>
 
           <button class="btn-retry" id="btn-retry">← 別のファイルを採譜</button>

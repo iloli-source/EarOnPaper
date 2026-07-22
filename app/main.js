@@ -14,6 +14,20 @@ const PYTHON = pu.resolveExecutable(pu.pythonCandidates(ENGINE_DIR))
 const generatedRoots = new Set()
 const activeProcesses = new Set()
 
+// 分離済みステムwavのキャッシュ: inputPath -> { dir, stems: {name: wavPath} }。
+// 分離(Demucs)は重いので1入力につき1回だけ実行し、選ばれた楽器だけ後段で採譜する。
+const separationCache = new Map()
+
+// 抽出楽器のメタ(表示順)。6-stem(htdemucs_6s)でギター/ピアノを分離して個別提示する。
+// drums(非音程)と other(残差)は除外。ギターをデフォルト先頭にしTABを持たせる。
+// ※ピアノは分離品質が実験的(音漏れ多め)だが、選択肢として提示する。
+const INSTRUMENTS = [
+  { id: 'guitar', label: 'ギター', hasTab: true },
+  { id: 'piano', label: 'ピアノ', hasTab: false },
+  { id: 'vocals', label: 'ボーカル', hasTab: false },
+  { id: 'bass', label: 'ベース', hasTab: false },
+]
+
 let mainWindow
 
 function createWindow() {
@@ -227,6 +241,124 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '
       reject(new Error(`Pythonの起動に失敗しました: ${err.message}`))
     })
   })
+})
+
+// ── 楽器分離 → 選択楽器のみ採譜 ────────────────────────────────
+// 分離(Demucs)を1回だけ実行して抽出楽器を提示し、ユーザーが選んだ楽器のwavだけを
+// 後段で採譜する。全楽器を一括採譜すると重すぎる(1曲10分超)ため、選択オンデマンドにする。
+
+// エンジンをspawnし stdout(JSON) を解析して返す。stderr行は onProgress へ流す。
+function runEngineJson(args, env, onProgress) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(PYTHON, ['-W', 'ignore::RuntimeWarning', '-m', 'earpipe.pipeline', ...args],
+      { cwd: ENGINE_DIR, env: env || { ...process.env } })
+    activeProcesses.add(proc)
+    let stdout = ''
+    let stderr = ''
+    proc.stdout.on('data', (c) => { stdout += c.toString() })
+    proc.stderr.on('data', (c) => {
+      const line = c.toString().trim()
+      if (line) { stderr += line + '\n'; if (onProgress) onProgress(line) }
+    })
+    proc.on('error', (e) => { activeProcesses.delete(proc); reject(new Error(`Pythonの起動に失敗しました: ${e.message}`)) })
+    proc.on('close', (code) => {
+      activeProcesses.delete(proc)
+      if (code !== 0) { reject(new Error(`エンジンがエラーで終了しました (code ${code})\n${stderr}`)); return }
+      try { resolve(JSON.parse(stdout)) } catch { reject(new Error('エンジン出力のパースに失敗しました')) }
+    })
+  })
+}
+
+// basic-pitch(poly)用の Python を見つけたら env に設定して返す(auto採譜のpoly経路用)
+function bpEnv() {
+  const env = { ...process.env }
+  const bp = pu.resolveExistingPath(pu.basicPitchPythonCandidates(ENGINE_DIR, env))
+  if (bp) env.EARPIPE_BP_PYTHON = bp
+  return env
+}
+
+// 分離のみ実行 → 抽出できた楽器一覧を返す(採譜はしない)
+ipcMain.handle('separate-audio', async (event, inputPath) => {
+  if (!pu.isAllowedAudioInput(inputPath)) {
+    throw new Error('対応していない形式です(音声ファイルを選んでください)')
+  }
+  try {
+    if (!fs.statSync(inputPath).isFile()) throw new Error('not a file')
+  } catch {
+    throw new Error('入力ファイルが見つからないか、ファイルではありません')
+  }
+
+  const sepDir = fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-sep-'))
+  generatedRoots.add(sepDir)
+  const result = await runEngineJson(
+    ['separate', inputPath, '--out-dir', sepDir],
+    { ...process.env },  // Demucsは .venv-demucs を規約で自動検出
+    (line) => event.sender.send('transcribe-progress', line),
+  )
+  const stems = result.stems || {}
+  separationCache.set(inputPath, { dir: sepDir, stems })
+  // 抽出できた melodic 楽器のみ(wavが実在)を、ギター優先の順で返す
+  const instruments = INSTRUMENTS
+    .filter((it) => stems[it.id])
+    .map((it) => ({ id: it.id, label: it.label, hasTab: it.hasTab }))
+  if (instruments.length === 0) throw new Error('採譜できる楽器が見つかりませんでした')
+  return { instruments }
+})
+
+// 選ばれた楽器(ステム)のwavだけを採譜して譜面を返す。分離は再実行しない。
+ipcMain.handle('transcribe-stem', async (event, inputPath, stemId, title = '', opts = {}) => {
+  const cache = separationCache.get(inputPath)
+  if (!cache || !cache.stems[stemId]) {
+    throw new Error('分離結果が見つかりません。もう一度ファイルを読み込んでください')
+  }
+  const wav = cache.stems[stemId]
+  const meta = INSTRUMENTS.find((it) => it.id === stemId)
+  const hasTab = !!(meta && meta.hasTab)
+
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-stem-'))
+  generatedRoots.add(outDir)
+  const outMusicxml = path.join(outDir, `${stemId}.musicxml`)
+  const outPdf = path.join(outDir, `${stemId}.pdf`)
+  const outMidi = path.join(outDir, `${stemId}.mid`)
+  const outTab = path.join(outDir, `${stemId}.tab.pdf`)
+
+  // 分離済みwavを直接採譜(--stem 指定なし=二重分離を避ける)。engine auto。
+  // ギター(other)は TAB も単旋律で生成する。
+  const args = [
+    'transcribe', wav,
+    '-o', outMusicxml, '--pdf', outPdf, '--midi', outMidi,
+    '--engine', 'auto',
+  ]
+  if (hasTab) args.push('--tab', outTab, '--tab-mono')
+  // 任意上書き(分かる人は指定): BPM範囲/拍子/キー。allowlistで検証してから渡す。
+  const o = opts || {}
+  if (/^\d+-\d+$/.test(String(o.bpmRange || ''))) args.push('--bpm-range', o.bpmRange)
+  if (['4/4', '3/4', '2/4'].includes(o.beat)) args.push('--beat', o.beat)
+  if (/^[A-G]#?$/.test(String(o.keyTonic || ''))) {
+    args.push('--key', o.keyTonic, '--mode', o.keyMode === 'minor' ? 'minor' : 'major')
+  }
+  const safeTitle = pu.clampTitle(title)
+  if (safeTitle) args.push('--title', `${safeTitle} (${meta.label})`)
+
+  const result = await runEngineJson(args, bpEnv(),
+    (line) => event.sender.send('transcribe-progress', line))
+
+  const paths = { musicxml: outMusicxml, pdf: outPdf, midi: outMidi }
+  await ensureOutputs(paths)
+  if (hasTab) {
+    try {
+      const st = await fs.promises.stat(outTab)
+      if (st.isFile() && st.size > 0) paths.tab = outTab
+    } catch { /* TAB は任意 */ }
+  }
+  const pdfUrl = pathToFileURL(outPdf).href
+  const tabUrl = paths.tab ? pathToFileURL(paths.tab).href : null
+  return {
+    stem: stemId, label: meta.label,
+    n_notes: result.n_notes, engine: result.engine,
+    bpm: result.bpm, tuning_offset_cents: result.tuning_offset_cents,
+    paths, pdfUrl, tabUrl,
+  }
 })
 
 // ── 詳細（音楽家向け）エクスポート ──────────────────────────────

@@ -11,6 +11,9 @@ function basenameForDisplay(filePath) {
 
 contextBridge.exposeInMainWorld('earpipe', {
   transcribe: (filePath, engine, title) => ipcRenderer.invoke('transcribe', filePath, engine, title),
+  // 分離→選択楽器のみ採譜フロー
+  separateAudio: (filePath) => ipcRenderer.invoke('separate-audio', filePath),
+  transcribeStem: (filePath, stemId, title, opts) => ipcRenderer.invoke('transcribe-stem', filePath, stemId, title, opts),
   openFileDialog: () => ipcRenderer.invoke('open-file-dialog'),
   saveFile: (src, ext, name) => ipcRenderer.invoke('save-file', src, ext, name),
   // 詳細エクスポート(簡譜/度数/GP5等)。savePath は E2E 時のみ使用。

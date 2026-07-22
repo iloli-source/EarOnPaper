@@ -1,6 +1,6 @@
-/* EarOnPaper Renderer */
+/* EarOnPaper Renderer — 分離→楽器選択→選択楽器のみ採譜 */
 
-// ステージ定義
+// ステージ定義（採譜フェーズの進捗表示に使う）
 const STAGES = [
   { index: 0, label: '音声読み込み中...', keywords: ['librosa', 'loading', 'reading', 'audio'] },
   { index: 1, label: '音高検出中...',     keywords: ['detect', 'pyin', 'adaptive', 'pitch', 'onset'] },
@@ -12,10 +12,20 @@ const STAGES = [
 let currentStage = 0
 let stageTimers = []
 const STAGE_DELAYS = [0, 4000, 14000, 24000, 34000] // ms
+// 中央への収束速度の倍率(ステージ毎に段階的に速く。小さいほど速い)
+const STAGE_SPEED = [1.0, 0.8, 0.62, 0.48, 0.36]
 
 function clearStageTimers() {
   stageTimers.forEach(clearTimeout)
   stageTimers = []
+}
+
+function startStageTimers() {
+  clearStageTimers()
+  STAGE_DELAYS.forEach((delay, i) => {
+    if (i === 0) return
+    stageTimers.push(setTimeout(() => setStage(i), delay))
+  })
 }
 
 // 譜面タイトル: 拡張子と末尾のフォーマット表記(mp3等)を除いた曲名にする
@@ -44,6 +54,16 @@ function setStage(index) {
   document.querySelectorAll('.stage-connector').forEach((el, i) => {
     el.classList.toggle('done', i < index)
   })
+
+  // 収束アニメの速度をステージ毎に上げる(段階的に速くなる)
+  const notesBg = document.getElementById('notes-bg')
+  if (notesBg) notesBg.style.setProperty('--speed', String(STAGE_SPEED[index] ?? STAGE_SPEED[STAGE_SPEED.length - 1]))
+}
+
+// 分離フェーズなど、ステージに乗らない任意ラベルを出す
+function setPhaseLabel(text) {
+  const label = document.getElementById('stage-label')
+  if (label) label.textContent = text
 }
 
 function detectStageFromLog(line) {
@@ -64,6 +84,7 @@ const NOTE_COLORS = [
 
 function spawnFlyingNotes(container) {
   container.innerHTML = ''
+  container.style.setProperty('--speed', String(STAGE_SPEED[0]))  // 収束速度を初期化
   const W = container.offsetWidth / 2 || 400
   const H = container.offsetHeight / 2 || 300
   for (let i = 0; i < 22; i++) {
@@ -87,6 +108,26 @@ function spawnFlyingNotes(container) {
     el.style.setProperty('--dur', `${1.8 + Math.random() * 2.2}s`)
     el.style.setProperty('--del', `${Math.random() * 3}s`)
     container.appendChild(el)
+  }
+}
+
+// 星空を生成(処理画面の宇宙背景)。notes-bgとは別レイヤーなので音符の再生成で消えない。
+function spawnStars(container) {
+  container.innerHTML = ''
+  const N = 90
+  for (let i = 0; i < N; i++) {
+    const s = document.createElement('div')
+    s.className = 'star'
+    const size = 0.7 + Math.random() * 1.9
+    s.style.width = `${size}px`
+    s.style.height = `${size}px`
+    s.style.left = `${Math.random() * 100}%`
+    s.style.top = `${Math.random() * 100}%`
+    if (i % 7 === 0) s.style.background = 'oklch(85% 0.09 250)'  // まれに青白い星
+    if (size > 2) s.style.boxShadow = `0 0 ${size * 2}px oklch(90% 0.05 250 / 0.7)`  // 大きい星は淡いグロー
+    s.style.setProperty('--tw', `${2 + Math.random() * 4}s`)
+    s.style.setProperty('--twd', `${Math.random() * 4}s`)
+    container.appendChild(s)
   }
 }
 
@@ -119,13 +160,29 @@ const states = {
   error: document.getElementById('state-error'),
 }
 
-let currentResult = null
-let currentInputPath = null  // 詳細エクスポートで元音声を再採譜するため保持
+let currentInput = null           // 現在の入力ファイルパス
+let currentTitle = ''             // 楽譜タイトル
+let currentInstrument = null      // 現在選択中のステムID
+let instrumentMeta = {}           // stemId -> {id,label,hasTab}
+const stemResults = new Map()     // stemId -> 採譜結果(このファイル内でキャッシュ)
+let currentView = 'staff'         // 'staff' | 'tab'
+let currentOverrides = {}         // 任意上書き {bpmRange, beat, keyTonic, keyMode}(曲全体に適用)
 let removeProgressListener = null
 
 function showState(name) {
   Object.values(states).forEach(el => el.classList.remove('active'))
   states[name].classList.add('active')
+}
+
+function attachProgress() {
+  if (removeProgressListener) removeProgressListener()
+  removeProgressListener = window.earpipe.onProgress((msg) => {
+    const stage = detectStageFromLog(msg)
+    if (stage >= 0) setStage(stage)
+  })
+}
+function detachProgress() {
+  if (removeProgressListener) { removeProgressListener(); removeProgressListener = null }
 }
 
 // ===== IDLE =====
@@ -148,7 +205,7 @@ dropzone.addEventListener('drop', (e) => {
   const file = e.dataTransfer.files[0]
   if (file) {
     const filePath = window.earpipe.getPathForFile(file)
-    startTranscribe(filePath, file.name)
+    startFlow(filePath, file.name)
   }
 })
 
@@ -166,63 +223,98 @@ async function triggerFileOpen() {
   const filePath = await window.earpipe.openFileDialog()
   if (filePath) {
     const name = window.earpipe.basenameForDisplay(filePath)
-    startTranscribe(filePath, name)
+    startFlow(filePath, name)
   }
 }
 
-// ===== PROCESSING =====
+// ===== フロー: 分離 → 楽器選択 → 選択楽器のみ採譜 =====
 
+async function startFlow(filePath, fileName) {
+  currentInput = filePath
+  currentTitle = cleanTitle(fileName)
+  stemResults.clear()
+  currentInstrument = null
 
-async function startTranscribe(filePath, fileName) {
-  currentInputPath = filePath  // 詳細エクスポートで再利用
-  const title = cleanTitle(fileName)
-  document.getElementById('processing-file').textContent = title
+  document.getElementById('processing-file').textContent = currentTitle
   currentStage = -1
   setStage(0)
+  setPhaseLabel('楽器を分離中…（少し時間がかかります）')
+  showState('processing')
+  const starfield = document.getElementById('starfield')
+  if (starfield) spawnStars(starfield)
+  const notesBg = document.getElementById('notes-bg')
+  if (notesBg) spawnFlyingNotes(notesBg)
+  attachProgress()
+
+  try {
+    const { instruments } = await window.earpipe.separateAudio(filePath)
+    detachProgress()
+    buildInstrumentButtons(instruments)
+    // デフォルト=ギター。無ければ先頭。
+    const def = instruments.find(i => i.id === 'guitar') || instruments[0]
+    await selectInstrument(def.id)
+  } catch (err) {
+    detachProgress()
+    showError(err.message)
+  }
+}
+
+function buildInstrumentButtons(instruments) {
+  instrumentMeta = {}
+  const box = document.getElementById('instrument-switch')
+  box.innerHTML = ''
+  for (const it of instruments) {
+    instrumentMeta[it.id] = it
+    const btn = document.createElement('button')
+    btn.className = 'instr-btn'
+    btn.dataset.stem = it.id
+    btn.textContent = it.label
+    btn.addEventListener('click', () => selectInstrument(it.id))
+    box.appendChild(btn)
+  }
+}
+
+function highlightInstrument(stemId) {
+  document.querySelectorAll('#instrument-switch .instr-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.stem === stemId)
+  })
+}
+
+async function selectInstrument(stemId) {
+  currentInstrument = stemId
+  highlightInstrument(stemId)
+
+  // 採譜済みならキャッシュを即表示（楽器切り替えは高速）
+  if (stemResults.has(stemId)) {
+    showInstrumentResult(stemResults.get(stemId))
+    return
+  }
+
+  // 未採譜: この楽器だけ採譜する
+  const meta = instrumentMeta[stemId] || { label: '楽器' }
+  currentStage = -1
+  setStage(0)
+  setPhaseLabel(`${meta.label}を採譜中…`)
   showState('processing')
   const notesBg = document.getElementById('notes-bg')
   if (notesBg) spawnFlyingNotes(notesBg)
-
-  // 時間ベースでステージを自動進行。完了/失敗時に必ず全部止める
-  // (単一ハンドル保持だと残ったタイマーが完了後に発火しステージ表示が巻き戻る)
-  clearStageTimers()
-  STAGE_DELAYS.forEach((delay, i) => {
-    if (i === 0) return
-    stageTimers.push(setTimeout(() => setStage(i), delay))
-  })
-
-  if (removeProgressListener) removeProgressListener()
-  // 3.5: 実処理ログからステージを検出してUIへ反映(タイマー任せの見かけ進捗を是正)
-  removeProgressListener = window.earpipe.onProgress((msg) => {
-    const stage = detectStageFromLog(msg)
-    if (stage >= 0) setStage(stage)
-  })
+  startStageTimers()
+  attachProgress()
 
   try {
-    const result = await window.earpipe.transcribe(filePath, 'auto', title)
+    const result = await window.earpipe.transcribeStem(currentInput, stemId, currentTitle, currentOverrides)
     clearStageTimers()
-    if (removeProgressListener) {
-      removeProgressListener()
-      removeProgressListener = null
-    }
-    currentResult = result
-    // E2E(?e2e=1 時のみ生えるフック)へ結果を渡し、生成物の中身検証を可能にする
+    detachProgress()
+    stemResults.set(stemId, result)
     if (window.__earpipeTest) window.__earpipeTest.lastResult = result
-    // 完了: バー100%→チャイム→結果表示
     const bar = document.getElementById('stage-progress-bar')
     if (bar) bar.style.width = '100%'
     document.querySelectorAll('.stage-step').forEach(el => el.classList.add('done'))
     document.querySelectorAll('.stage-connector').forEach(el => el.classList.add('done'))
-    setTimeout(() => {
-      playChime()
-      showResult(result)
-    }, 300)
+    setTimeout(() => { playChime(); showInstrumentResult(result) }, 250)
   } catch (err) {
     clearStageTimers()
-    if (removeProgressListener) {
-      removeProgressListener()
-      removeProgressListener = null
-    }
+    detachProgress()
     showError(err.message)
   }
 }
@@ -230,84 +322,108 @@ async function startTranscribe(filePath, fileName) {
 // ===== DONE =====
 
 const scorePanel = document.getElementById('score-panel')
-const scorePlaceholder = document.getElementById('score-placeholder')
 
-function showResult(result) {
-  // 統計表示
+function renderScore(result) {
+  const url = (currentView === 'tab' && result.tabUrl) ? result.tabUrl : result.pdfUrl
+  if (!url) return
+  const embed = document.createElement('embed')
+  embed.src = url
+  embed.type = 'application/pdf'
+  scorePanel.innerHTML = ''
+  scorePanel.appendChild(embed)
+}
+
+function updateViewButtons() {
+  document.querySelectorAll('#view-toggle .view-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.view === currentView)
+  })
+}
+
+function showInstrumentResult(result) {
   document.getElementById('stat-notes').textContent = result.n_notes ?? '—'
   document.getElementById('stat-bpm').textContent =
     result.bpm ? `${Math.round(result.bpm)} BPM` : '—'
   document.getElementById('stat-engine').textContent = result.engine ?? '—'
-  const cents = result.tuning_offset_cents
-  document.getElementById('stat-tuning').textContent =
-    cents != null ? `${cents > 0 ? '+' : ''}${cents.toFixed(1)} cents` : '—'
 
-  // PDF表示: file URL はメイン側が生成した result.pdfUrl を使う(preload は node:url 不要)
-  if (result.pdfUrl) {
-    const embed = document.createElement('embed')
-    embed.src = result.pdfUrl
-    embed.type = 'application/pdf'
-    scorePanel.innerHTML = ''
-    scorePanel.appendChild(embed)
-  }
+  // 表示切替は TAB を持つ楽器(ギター)だけ。デフォルトは TAB。
+  const hasTab = !!result.tabUrl
+  document.getElementById('view-toggle-card').hidden = !hasTab
+  currentView = hasTab ? 'tab' : 'staff'
+  updateViewButtons()
+  renderScore(result)
 
-  // TAB譜は任意出力: 生成できたときだけボタンを表示する
-  const tabBtn = document.getElementById('btn-export-tab')
-  if (tabBtn) tabBtn.hidden = !result.paths?.tab
+  // エクスポート: TAB は生成できた楽器だけ表示
+  document.getElementById('btn-export-tab').hidden = !result.paths?.tab
 
   showState('done')
 }
 
-// エクスポートボタン
-document.getElementById('btn-export-pdf').addEventListener('click', async () => {
-  if (!currentResult?.paths?.pdf) return
-  const name = window.earpipe.basenameForDisplay(currentResult.paths.pdf)
-  await window.earpipe.saveFile(currentResult.paths.pdf, 'pdf', name)
-})
+function currentResult() {
+  return currentInstrument ? stemResults.get(currentInstrument) : null
+}
 
-document.getElementById('btn-export-tab').addEventListener('click', async () => {
-  if (!currentResult?.paths?.tab) return
-  const name = window.earpipe.basenameForDisplay(currentResult.paths.tab)
-  await window.earpipe.saveFile(currentResult.paths.tab, 'pdf', name)
-})
-
-document.getElementById('btn-export-musicxml').addEventListener('click', async () => {
-  if (!currentResult?.paths?.musicxml) return
-  const name = window.earpipe.basenameForDisplay(currentResult.paths.musicxml)
-  await window.earpipe.saveFile(currentResult.paths.musicxml, 'musicxml', name)
-})
-
-document.getElementById('btn-export-midi').addEventListener('click', async () => {
-  if (!currentResult?.paths?.midi) return
-  const name = window.earpipe.basenameForDisplay(currentResult.paths.midi)
-  await window.earpipe.saveFile(currentResult.paths.midi, 'mid', name)
-})
-
-// 詳細（音楽家向け）エクスポート: 簡譜/度数/Nashville/GP5 等を元音声から生成して保存する。
-// 生成には元音声の再採譜が要るため数秒かかる。押下中はボタンを無効化し状態を表示する。
-const extraStatus = document.getElementById('extra-export-status')
-document.querySelectorAll('#extra-export-buttons [data-extra]').forEach((btn) => {
-  btn.addEventListener('click', async () => {
-    if (!currentInputPath) return
-    const key = btn.dataset.extra
-    const buttons = document.querySelectorAll('#extra-export-buttons [data-extra]')
-    buttons.forEach((b) => { b.disabled = true })
-    extraStatus.textContent = `${btn.textContent.trim()} を生成中…（元音声を解析します）`
-    try {
-      const saved = await window.earpipe.exportExtra(currentInputPath, key)
-      extraStatus.textContent = saved
-        ? `保存しました: ${window.earpipe.basenameForDisplay(saved)}`
-        : 'キャンセルしました'
-    } catch (err) {
-      extraStatus.textContent = `エラー: ${err?.message || err}`
-    } finally {
-      buttons.forEach((b) => { b.disabled = false })
-    }
+// 表示切替(五線譜/TAB)
+document.querySelectorAll('#view-toggle .view-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    currentView = btn.dataset.view
+    updateViewButtons()
+    const r = currentResult()
+    if (r) renderScore(r)
   })
 })
 
+// エクスポート（選択中の楽器の成果物を保存）
+document.getElementById('btn-export-pdf').addEventListener('click', async () => {
+  const r = currentResult()
+  if (!r?.paths?.pdf) return
+  const name = window.earpipe.basenameForDisplay(r.paths.pdf)
+  await window.earpipe.saveFile(r.paths.pdf, 'pdf', name)
+})
+
+document.getElementById('btn-export-tab').addEventListener('click', async () => {
+  const r = currentResult()
+  if (!r?.paths?.tab) return
+  const name = window.earpipe.basenameForDisplay(r.paths.tab)
+  await window.earpipe.saveFile(r.paths.tab, 'pdf', name)
+})
+
+document.getElementById('btn-export-midi').addEventListener('click', async () => {
+  const r = currentResult()
+  if (!r?.paths?.midi) return
+  const name = window.earpipe.basenameForDisplay(r.paths.midi)
+  await window.earpipe.saveFile(r.paths.midi, 'mid', name)
+})
+
+// 詳細設定(任意)を読む。未選択は null（自動）。
+function readOverrides() {
+  return {
+    bpmRange: document.getElementById('opt-bpm').value || null,
+    beat: document.getElementById('opt-beat').value || null,
+    keyTonic: document.getElementById('opt-key').value || null,
+    keyMode: document.getElementById('opt-mode').value || 'major',
+  }
+}
+
+// 「この設定で採譜し直す」: 上書きは曲全体に効くので全楽器キャッシュを破棄し、
+// 現在の楽器を新しい設定で採り直す。
+document.getElementById('btn-reapply').addEventListener('click', async () => {
+  if (!currentInput || !currentInstrument) return
+  currentOverrides = readOverrides()
+  stemResults.clear()
+  await selectInstrument(currentInstrument)
+})
+
 document.getElementById('btn-retry').addEventListener('click', () => {
-  currentResult = null
+  currentInput = null
+  currentInstrument = null
+  currentOverrides = {}
+  stemResults.clear()
+  ;['opt-bpm', 'opt-beat', 'opt-key'].forEach((id) => {
+    const el = document.getElementById(id)
+    if (el) el.value = ''
+  })
+  const modeEl = document.getElementById('opt-mode')
+  if (modeEl) modeEl.value = 'major'
   scorePanel.innerHTML = '<div class="score-placeholder" id="score-placeholder"><span>📄</span><span>楽譜を読み込み中...</span></div>'
   showState('idle')
 })
@@ -332,10 +448,9 @@ document.getElementById('btn-error-back').addEventListener('click', () => {
   showState('idle')
 })
 
-// E2Eテスト専用フック(#61): 実UIのドラッグ&ドロップは Electron の webUtils 経由でしか
-// 実パスを得られず Playwright から合成できないため、ドロップと同一の入口 startTranscribe を
-// テストから起動できるよう公開する。**本番では絶対に露出しない**: main.js が E2E 起動時
-// (env EARPAPER_E2E=1)にのみ URL へ ?e2e=1 を付与し、その時だけフックを生やす。
+// E2Eテスト専用フック(#61): ドロップと同一の入口をテストから起動できるよう公開する。
+// **本番では絶対に露出しない**: main.js が E2E 起動時(env EARPAPER_E2E=1)にのみ
+// URL へ ?e2e=1 を付与し、その時だけフックを生やす。
 if (new URLSearchParams(window.location.search).get('e2e') === '1') {
-  window.__earpipeTest = { startTranscribe }
+  window.__earpipeTest = { startFlow, selectInstrument }
 }
