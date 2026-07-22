@@ -84,6 +84,7 @@ def transcribe_file(
     timing: str = "grid",
     title: str | None = None,
     chord_diagrams: bool = True,
+    tab_monophonic: bool = False,
     stem: str | None = None,
     formats: list[tuple[str, str]] | None = None,
     analyses: list[tuple[str, str]] | None = None,
@@ -274,7 +275,7 @@ def transcribe_file(
         # TAB譜出力プロファイル(NF-045)。五線譜と独立に生成できる
         result["tab"] = write_tab_pdf(
             notes, bpm, out_tab, title=title or Path(in_path_orig).stem,
-            chord_diagrams=chord_diagrams,
+            chord_diagrams=chord_diagrams, monophonic=tab_monophonic,
         )
     if out_tab_plain:
         # 押さえ図なし版（コードネームのみ）。ビューアのトグル用に同時生成
@@ -410,6 +411,10 @@ def main(argv: list[str] | None = None) -> int:
     pt.add_argument("--tab", help="ギターTAB譜PDF出力先(任意。6弦標準EADGBE・NF-045)")
     pt.add_argument("--tab-plain", dest="tab_plain", help="押さえ図なしTAB(コードネームのみ)の出力先(任意)")
     pt.add_argument(
+        "--tab-mono", dest="tab_mono", action="store_true",
+        help="TAB譜を各拍の主旋律1音に絞る(多声ステム抽出時に演奏可能な単音TABにする)",
+    )
+    pt.add_argument(
         "--chord-diagrams", dest="chord_diagrams", action="store_true", default=True,
         help="TABのコード帯に押さえ図を表示(既定ON)",
     )
@@ -527,6 +532,7 @@ def main(argv: list[str] | None = None) -> int:
         out_tab=args.tab,
         out_tab_plain=args.tab_plain,
         chord_diagrams=args.chord_diagrams,
+        tab_monophonic=args.tab_mono,
         engine=args.engine,
         sensitivity=args.sensitivity,
         postfilter=args.postfilter,

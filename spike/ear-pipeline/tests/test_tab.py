@@ -12,6 +12,7 @@ from earpipe.services.notate.tab import (
     MAX_FRET,
     TUNING_GUITAR,
     TabNote,
+    _reduce_to_melody,
     assign_frets,
     count_overlaps,
     fold_to_range,
@@ -201,3 +202,45 @@ class TestWriteTabPdf:
         write_tab_pdf([qn(0, 1, 60)], bpm=120, out_pdf=out, title="Song 9")
         text = " ".join(p.extract_text() or "" for p in pypdf.PdfReader(str(out)).pages)
         assert "Song 9" in text
+
+
+class TestReduceToMelody:
+    def test_keeps_highest_note_per_onset(self):
+        # Arrange: 同じ拍に3和音(C-E-G)、次の拍に単音
+        chord = [qn(0, 1, 60), qn(0, 1, 64), qn(0, 1, 67)]
+        nxt = [qn(1, 1, 62)]
+        # Act
+        melody = _reduce_to_melody(chord + nxt)
+        # Assert: 各オンセット1音、和音は最高音(67)を採用
+        assert [n.midi for n in melody] == [67, 62]
+
+    def test_tie_break_by_confidence(self):
+        # Arrange: 同オンセット・同音高なら高信頼度を残す
+        melody = _reduce_to_melody([qn(0, 1, 60, conf=0.3), qn(0, 1, 60, conf=0.9)])
+        # Assert
+        assert len(melody) == 1 and melody[0].confidence == 0.9
+
+    def test_empty(self):
+        assert _reduce_to_melody([]) == []
+
+    def test_monophonic_tab_has_no_overlaps(self):
+        # Arrange: 押さえられない密集和音を各拍に配置
+        notes = []
+        for beat in range(4):
+            for m in (55, 58, 60, 63, 67, 70):  # 同時6音・広域
+                notes.append(qn(beat, 1, m))
+        # Act: monophonic=True で単旋律TAB化
+        mono_tabs = assign_frets(_reduce_to_melody(notes))
+        # Assert: 各オンセット1音のみ→弦の重なり(同時発音)が無い
+        assert count_overlaps(mono_tabs) == 0
+        assert len(mono_tabs) == 4
+
+    def test_write_tab_pdf_monophonic_flag(self, tmp_path: Path):
+        # Arrange: 和音を含む音符列
+        notes = [qn(0, 1, 60), qn(0, 1, 64), qn(0, 1, 67), qn(1, 1, 62)]
+        out = tmp_path / "mono.pdf"
+        # Act
+        write_tab_pdf(notes, bpm=120, out_pdf=out, monophonic=True)
+        # Assert: PDFが生成され、単旋律化で同時発音が消える
+        assert out.exists() and out.stat().st_size > 0
+        assert count_overlaps(assign_frets(_reduce_to_melody(notes))) == 0

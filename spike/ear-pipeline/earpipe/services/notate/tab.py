@@ -82,6 +82,21 @@ def _group_by_start(notes: Sequence[QuantizedNote]) -> list[list[QuantizedNote]]
     return [groups[k] for k in sorted(groups)]
 
 
+def _reduce_to_melody(notes: Sequence[QuantizedNote]) -> list[QuantizedNote]:
+    """各オンセット群から最高音(スカイライン=主旋律)1音だけ残して単旋律化する。
+
+    多声ステム(other等)をpoly検出した音符列は和音を含み、そのままだと物理的に
+    押さえられないTAB配置が出る。各拍で最高音(同点は高信頼度)を主旋律として選ぶと、
+    同時発音が常に1音になり、TABは必ず演奏可能になる。
+    """
+    if not notes:
+        return []
+    melody: list[QuantizedNote] = []
+    for group in _group_by_start(notes):
+        melody.append(max(group, key=lambda n: (n.midi, n.confidence)))
+    return melody
+
+
 def _assign_group_at(midis: list[int], pos: int) -> list[tuple[int, int]] | None:
     """ポジションposで全音を割当てる。開放弦(f0)またはpos..pos+WINDOW内のみ許可。
 
@@ -367,15 +382,19 @@ def count_overlaps(tabs: list[TabNote]) -> int:
 
 def write_tab_pdf(notes: Sequence[QuantizedNote], bpm: float,
                   out_pdf: str | Path, title: str | None = None,
-                  chord_diagrams: bool = True) -> dict:
+                  chord_diagrams: bool = True, monophonic: bool = False) -> dict:
     """QuantizedNote列をギターTAB譜PDFにする。
 
     chord_diagrams: Trueならコード帯にコードネーム＋押さえ図、Falseならコードネームのみ。
+    monophonic: Trueなら各オンセットの最高音(主旋律)1音だけ残して単音TAB化する
+        (多声ステムをpoly検出した音源を、常に演奏可能な単旋律TABにするため)。
     戻り値: {"pages", "n_octave_shifted", "n_dropped", "n_notes_placed", "n_overlaps", "n_chords"}
     """
     import cairosvg
     import pypdf
 
+    if monophonic:
+        notes = _reduce_to_melody(notes)
     tabs = assign_frets(notes)
     chord_spans = estimate_chords(notes, bpm)
     n_shifted = sum(1 for t in tabs if t.octave_shift)
