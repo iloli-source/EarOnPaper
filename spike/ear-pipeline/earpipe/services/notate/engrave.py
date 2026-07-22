@@ -70,7 +70,10 @@ def plain_tempo_svg(svg: str) -> str:
 # cairosvgはフォント未指定のテキストをCJKグリフを持たないデフォルトフォントで
 # 描画し、日本語タイトルが豆腐(□)化する。ヘッダー(pgHead=曲名等)のテキストに
 # CJK対応フォントスタックを明示注入して防ぐ(macOS=Hiragino / Linux=Noto)。
-_CJK_FONT_STACK = "Hiragino Sans, Hiragino Kaku Gothic ProN, Noto Sans CJK JP, sans-serif"
+# cairosvgは候補リストのフォールバックをせず先頭の実在フォントで全グリフを描画するため、
+# Hiragino Sans先頭だと日本語は出るが韓国語(Hangul)が豆腐化する。JP/KR/CN/ラテンを網羅する
+# Arial Unicode MS(macOS標準・pan-Unicode)を先頭に置く。
+_CJK_FONT_STACK = "Arial Unicode MS, Hiragino Sans, Hiragino Kaku Gothic ProN, Noto Sans CJK JP, sans-serif"
 
 
 def cjk_safe_header_svg(svg: str) -> str:

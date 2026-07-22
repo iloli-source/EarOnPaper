@@ -282,7 +282,11 @@ def _render_pages(tabs: list[TabNote], bpm: float, title: str | None,
         cap = sys_per_page_first if first else sys_per_page
         parts: list[str] = [
             f'<svg xmlns="http://www.w3.org/2000/svg" width="{_PAGE_W}" height="{_PAGE_H}" '
-            f'viewBox="0 0 {_PAGE_W} {_PAGE_H}" font-family="Helvetica, Arial, sans-serif">',
+            # cairosvgは候補リストのフォールバックをせず先頭の実在フォントで全描画するため、
+            # 日本語/韓国語タイトルの豆腐化を防ぐにはCJK対応フォントを先頭に置く必要がある。
+            # Arial Unicode MS(macOS標準・pan-Unicode)がJP/KR/CN/ラテンを網羅。
+            f'viewBox="0 0 {_PAGE_W} {_PAGE_H}" '
+            f'font-family="\'Arial Unicode MS\', \'Hiragino Sans\', \'Noto Sans CJK JP\', Helvetica, Arial, sans-serif">',
             f'<rect width="{_PAGE_W}" height="{_PAGE_H}" fill="white"/>',
         ]
         y = _MARGIN

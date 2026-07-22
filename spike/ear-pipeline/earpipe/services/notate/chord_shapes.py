@@ -86,7 +86,11 @@ def shape_for(root_pc: int, quality: str) -> list[int | None]:
 
 
 def diagram_svg(shape: list[int | None], name: str, x: float, y: float, scale: float = 1.0) -> str:
-    """コードダイアグラムのSVG断片を返す。(x, y)は左上。6弦×4フレットの図。"""
+    """コードダイアグラムのSVG断片を返す。(x, y)は左上。6弦×4フレットの図。
+
+    図(弦・フレット・押さえ点)は反時計回りに90度回転して横向きに描く
+    (見やすさ優先・MIE要望 2026-07-23)。コード名テキストは正立のまま。
+    """
     frets_shown = 4
     cw = 9 * scale   # 弦間隔
     ch = 11 * scale  # フレット間隔
@@ -95,39 +99,43 @@ def diagram_svg(shape: list[int | None], name: str, x: float, y: float, scale: f
     # 押弦フレットの基準（最小の正フレット）。0/Noneを除く
     fretted = [f for f in shape if f and f > 0]
     base = min(fretted) if fretted and max(fretted) > frets_shown else 1
-    parts: list[str] = []
-    # コード名
-    parts.append(f'<text x="{x + w/2}" y="{y - 3}" font-size="{11*scale:.1f}" '
-                 f'text-anchor="middle" font-weight="bold">{_esc(name)}</text>')
-    # ナット or 開始フレット表示
     top = y + 4
+    rcx = x + w / 2   # 図の回転中心
+    rcy = top + h / 2
+    grid: list[str] = []   # 図の中身(回転対象)
+    # ナット or 開始フレット表示
     if base > 1:
-        parts.append(f'<text x="{x - 4}" y="{top + ch*0.8:.1f}" font-size="{7*scale:.1f}" '
-                     f'text-anchor="end" fill="#666">{base}</text>')
+        grid.append(f'<text x="{x - 4}" y="{top + ch*0.8:.1f}" font-size="{7*scale:.1f}" '
+                    f'text-anchor="end" fill="#666">{base}</text>')
     else:
         # ナット（太線）
-        parts.append(f'<rect x="{x}" y="{top-1.5}" width="{w}" height="2.5" fill="#333"/>')
+        grid.append(f'<rect x="{x}" y="{top-1.5}" width="{w}" height="2.5" fill="#333"/>')
     # 弦（縦線6本）
     for s in range(6):
         sx = x + s * cw
-        parts.append(f'<line x1="{sx}" y1="{top}" x2="{sx}" y2="{top + h}" stroke="#555" stroke-width="{0.8*scale:.1f}"/>')
+        grid.append(f'<line x1="{sx}" y1="{top}" x2="{sx}" y2="{top + h}" stroke="#555" stroke-width="{0.8*scale:.1f}"/>')
     # フレット（横線）
     for fr in range(frets_shown + 1):
         fy = top + fr * ch
-        parts.append(f'<line x1="{x}" y1="{fy}" x2="{x + w}" y2="{fy}" stroke="#555" stroke-width="{0.8*scale:.1f}"/>')
+        grid.append(f'<line x1="{x}" y1="{fy}" x2="{x + w}" y2="{fy}" stroke="#555" stroke-width="{0.8*scale:.1f}"/>')
     # 各弦の押弦点/開放/ミュート
     for s in range(6):
         sx = x + s * cw
         f = shape[s]
         if f is None:
-            parts.append(f'<text x="{sx}" y="{top - 2}" font-size="{7*scale:.1f}" text-anchor="middle" fill="#999">×</text>')
+            grid.append(f'<text x="{sx}" y="{top - 2}" font-size="{7*scale:.1f}" text-anchor="middle" fill="#999">×</text>')
         elif f == 0:
-            parts.append(f'<circle cx="{sx}" cy="{top - 4}" r="{2.2*scale:.1f}" fill="none" stroke="#666" stroke-width="0.8"/>')
+            grid.append(f'<circle cx="{sx}" cy="{top - 4}" r="{2.2*scale:.1f}" fill="none" stroke="#666" stroke-width="0.8"/>')
         else:
             rel = f - base + 1
             cy = top + (rel - 0.5) * ch
-            parts.append(f'<circle cx="{sx}" cy="{cy:.1f}" r="{3*scale:.1f}" fill="#222"/>')
-    return "".join(parts)
+            grid.append(f'<circle cx="{sx}" cy="{cy:.1f}" r="{3*scale:.1f}" fill="#222"/>')
+    # コード名(正立・回転の外)
+    name_svg = (f'<text x="{rcx:.1f}" y="{y - 3:.1f}" font-size="{11*scale:.1f}" '
+                f'text-anchor="middle" font-weight="bold">{_esc(name)}</text>')
+    # 図本体を反時計回り90度回転
+    body = f'<g transform="rotate(-90 {rcx:.1f} {rcy:.1f})">' + "".join(grid) + "</g>"
+    return name_svg + body
 
 
 def _esc(s: str) -> str:

@@ -196,4 +196,30 @@ class TestCJKTitle:
         resources = page.get("/Resources", {})
         for f in resources.get("/Font", {}).values():
             fonts.add(str(f.get_object().get("/BaseFont", "")))
-        assert any("Hiragino" in f or "Noto" in f for f in fonts), fonts
+        # CJK対応フォント(Arial Unicode MS=JP/KR/CN網羅を優先 / Hiragino / Noto)が埋め込まれていること
+        assert any(
+            "ArialUnicode" in f or "Hiragino" in f or "Noto" in f for f in fonts
+        ), fonts
+
+    def test_kr_title_renders_not_tofu(self, tmp_path):
+        # 韓国語(Hangul)タイトルの豆腐化防止。Hiragino Sans先頭では韓国語が
+        # 描画できず豆腐化していた(2026-07-22 目視検証で発覚)。pan-Unicodeフォントを
+        # 先頭に置くことで日本語だけでなく韓国語も埋め込まれることを保証する。
+        events = [
+            PitchEvent(onset=i * 0.5, offset=i * 0.5 + 0.45, midi=60 + i, confidence=0.9)
+            for i in range(8)
+        ]
+        notes = quantize_events(events, bpm=120.0)
+        score = to_score(notes, bpm=120.0, title="이젠 안녕")
+        xml = tmp_path / "kr.musicxml"
+        write_musicxml(score, xml)
+        out = tmp_path / "kr.pdf"
+
+        write_pdf(xml, out)
+
+        reader = PdfReader(str(out))
+        fonts = set()
+        for f in reader.pages[0].get("/Resources", {}).get("/Font", {}).values():
+            fonts.add(str(f.get_object().get("/BaseFont", "")))
+        # 韓国語グリフを持つ pan-Unicode フォントが埋め込まれていること
+        assert any("ArialUnicode" in f or "Noto" in f for f in fonts), fonts
