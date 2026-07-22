@@ -70,6 +70,29 @@ from earpipe.services.stem import (
 )
 
 
+def _apply_bpm_override(
+    bpm_est: float,
+    override: float | None,
+    rng: tuple[float, float] | None,
+) -> float:
+    """テンポの任意上書き。exact指定があれば置換、範囲指定なら推定値を
+    ×2/÷2で範囲へ畳み込む(倍/半分の取り違え=オクターブ誤りを補正)。"""
+    if override:
+        return float(override)
+    if rng:
+        lo, hi = rng
+        b = float(bpm_est)
+        for _ in range(6):
+            if b < lo:
+                b *= 2
+            elif b > hi:
+                b /= 2
+            else:
+                break
+        return b
+    return float(bpm_est)
+
+
 def transcribe_file(
     in_path: str | Path,
     out_musicxml: str | Path | None = None,
@@ -85,6 +108,12 @@ def transcribe_file(
     title: str | None = None,
     chord_diagrams: bool = True,
     tab_monophonic: bool = False,
+    bpm_override: float | None = None,
+    bpm_range: tuple[float, float] | None = None,
+    beats_per_measure: int | None = None,
+    time_signature: str | None = None,
+    key_tonic: str | None = None,
+    key_mode: str = "major",
     stem: str | None = None,
     formats: list[tuple[str, str]] | None = None,
     analyses: list[tuple[str, str]] | None = None,
@@ -199,6 +228,7 @@ def transcribe_file(
 
     if events:
         bpm, grid_per_beat = estimate_grid(events)  # 格子系(2分/3分)も同時推定(#39)
+        bpm = _apply_bpm_override(bpm, bpm_override, bpm_range)  # 任意上書き
         notes = quantize_events(
             events, bpm, mono=(resolved_engine == "mono"), grid_per_beat=grid_per_beat
         )
@@ -206,7 +236,7 @@ def transcribe_file(
         # ならないよう、最初の音符を0拍目に揃える(格子側のみ。実タイミング保持)
         notes, anchored_lead_beats = anchor_to_zero(notes)
     else:
-        bpm = BPM_DEFAULT
+        bpm = _apply_bpm_override(BPM_DEFAULT, bpm_override, bpm_range)
         grid_per_beat = GRID_PER_BEAT
         notes = []
         anchored_lead_beats = 0.0
@@ -217,7 +247,12 @@ def transcribe_file(
     base_title = title or Path(in_path_orig).stem
     # ステム分離時はどの楽器の譜面か分かるようステム名を併記する
     effective_title = f"{base_title} ({stem_used})" if stem_used else base_title
-    score = to_score(notes, bpm, title=effective_title)
+    score = to_score(
+        notes, bpm, title=effective_title,
+        beats_per_measure=beats_per_measure,
+        time_signature=time_signature,
+        key_tonic=key_tonic, key_mode=key_mode,
+    )
     if out_musicxml:
         write_musicxml(score, out_musicxml)  # 譜面は常に格子側(楽譜=量子化表現)
     if out_midi:
@@ -337,6 +372,36 @@ def transcribe_file(
     return result
 
 
+_ALLOWED_BEATS = ("2/4", "3/4", "4/4")
+
+
+def _parse_beat(beat: str | None) -> str | None:
+    """--beat の拍子文字列を検証して返す。対応: 2/4 3/4 4/4。
+
+    6/8等の複合拍子は意図的に非対応(ポピュラーに少なく、小節長は3/4と同じ=3拍で
+    代用できるため。システムをシンプルに保つ・MIE助言 2026-07-23)。
+    """
+    if not beat:
+        return None
+    b = beat.strip()
+    if b not in _ALLOWED_BEATS:
+        raise ValueError(f"--beat は {'/'.join(_ALLOWED_BEATS)} のいずれかで指定してください(指定: {beat!r})")
+    return b
+
+
+def _parse_bpm_range(rng: str | None) -> tuple[float, float] | None:
+    """--bpm-range "60-80"(全角〜も可)を (60.0, 80.0) に変換。"""
+    if not rng:
+        return None
+    parts = rng.replace("〜", "-").split("-")
+    if len(parts) != 2:
+        raise ValueError(f"--bpm-range は 60-80 の形式で指定してください(指定: {rng!r})")
+    lo, hi = float(parts[0]), float(parts[1])
+    if lo <= 0 or hi <= lo:
+        raise ValueError(f"--bpm-range の範囲が不正です: {rng!r}")
+    return (lo, hi)
+
+
 def _parse_format_specs(
     specs: list[str] | None, input_path: str
 ) -> list[tuple[str, str]] | None:
@@ -414,6 +479,18 @@ def main(argv: list[str] | None = None) -> int:
         "--tab-mono", dest="tab_mono", action="store_true",
         help="TAB譜を各拍の主旋律1音に絞る(多声ステム抽出時に演奏可能な単音TABにする)",
     )
+    # 「分かる人は指定してね」= BPM/拍子/キーの任意上書き(未指定は自動検出)
+    pt.add_argument("--bpm", type=float, default=None, help="テンポを数値で指定(自動検出を上書き)")
+    pt.add_argument(
+        "--bpm-range", dest="bpm_range", default=None,
+        help="テンポの範囲を指定 例:60-80(倍/半分の取り違えを範囲へ畳み込んで補正)",
+    )
+    pt.add_argument("--beat", default=None, help="拍子を指定 例:4/4 3/4 2/4(自動検出を上書き)")
+    pt.add_argument("--key", dest="key_tonic", default=None, help="キーの主音を指定 例:C C# A(自動検出を上書き)")
+    pt.add_argument(
+        "--mode", dest="key_mode", default="major", choices=["major", "minor"],
+        help="キーの旋法(既定major。--key と併用)",
+    )
     pt.add_argument(
         "--chord-diagrams", dest="chord_diagrams", action="store_true", default=True,
         help="TABのコード帯に押さえ図を表示(既定ON)",
@@ -475,6 +552,15 @@ def main(argv: list[str] | None = None) -> int:
         help="drums(非音程)も採譜対象に含める(既定: 旋律ステムのみ)",
     )
 
+    # ステム分離のみ(採譜なし): UIが抽出楽器を提示→選んだ楽器だけ後段で採譜する用途
+    psep = sub.add_parser("separate", help="ステム分離のみ実行し各stemのwavパスをJSONで返す(採譜なし)")
+    psep.add_argument("input", help="入力音声(wav/mp3等)")
+    psep.add_argument("--out-dir", required=True, help="ステムwavの出力先ディレクトリ(呼び出し側が管理)")
+    psep.add_argument(
+        "--model", default="htdemucs_6s",
+        help="Demucsモデル(既定htdemucs_6s=guitar/pianoも分離。htdemucsは4-stem)",
+    )
+
     # 長尺音源の分割(F-004): 無音優先で max-sec を超えないチャンクへ
     pc = sub.add_parser("chunk", help="長尺音源を無音優先で複数wavに分割(F-004)")
     pc.add_argument("input", help="入力音声(wav/mp3等)")
@@ -506,6 +592,8 @@ def main(argv: list[str] | None = None) -> int:
 
     args = p.parse_args(argv)
 
+    if args.command == "separate":
+        return _run_separate(args)
     if args.command == "separate-transcribe":
         return _run_separate_transcribe(args)
     if args.command == "chunk":
@@ -524,6 +612,9 @@ def main(argv: list[str] | None = None) -> int:
     formats = _parse_format_specs(args.formats, args.input)
     analyses = _parse_analysis_specs(args.analyses, args.input)
     emits = _parse_emit_specs(args.emits, args.input)
+    # 任意上書きのパース: --beat "4/4"/"6/8"→拍子文字列、--bpm-range "60-80"→(60,80)
+    time_signature = _parse_beat(args.beat)
+    bpm_range = _parse_bpm_range(args.bpm_range)
     result = transcribe_file(
         args.input,
         out_musicxml=out,
@@ -533,6 +624,11 @@ def main(argv: list[str] | None = None) -> int:
         out_tab_plain=args.tab_plain,
         chord_diagrams=args.chord_diagrams,
         tab_monophonic=args.tab_mono,
+        bpm_override=args.bpm,
+        bpm_range=bpm_range,
+        time_signature=time_signature,
+        key_tonic=args.key_tonic,
+        key_mode=args.key_mode,
         engine=args.engine,
         sensitivity=args.sensitivity,
         postfilter=args.postfilter,
@@ -548,6 +644,27 @@ def main(argv: list[str] | None = None) -> int:
     summary["output"] = out
     summary["rights"] = rights_summary()  # F-073: 権利注意を成果物に添える
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _run_separate(args) -> int:
+    """ステム分離のみ実行(F-003)。各ステムwavを out-dir に残し、パスをJSONで返す。
+
+    採譜は行わない。UI が抽出楽器を提示し、ユーザーが選んだ楽器だけを後段で
+    (このwavを stem=None で採譜して)譜面化するための軽量エントリ。out-dir の
+    削除は呼び出し側(アプリ)が担う。
+    """
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    sep = separate_stems(args.input, out_dir, model=args.model)
+    print(json.dumps(
+        {
+            "input": args.input,
+            "model": sep.model,
+            "stems": {name: str(path) for name, path in sep.stems.items()},
+        },
+        ensure_ascii=False, indent=2,
+    ))
     return 0
 
 

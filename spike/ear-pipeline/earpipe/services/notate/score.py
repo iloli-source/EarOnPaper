@@ -290,11 +290,16 @@ def to_score(
     bpm: float,
     title: str | None = None,
     beats_per_measure: int | None = None,
+    time_signature: str | None = None,
+    key_tonic: str | None = None,
+    key_mode: str = "major",
 ) -> music21.stream.Score:
     """量子化済み音符列を五線譜スコアにする。
 
     拍子は beats_per_measure が None のとき estimate_meter で推定する
     (アクセント周期からL/4を選択・確証が弱ければ4/4に退避。Issue #57/#59)。
+    key_tonic を与えると estimate_key の自動推定を上書きする(例: "C"/"C#"/"A")。
+    「分かる人は指定してね」の任意上書き。None のときは従来通り自動推定。
     ピアノ音域(中央Cをまたぐ入力)は大譜表(ト音+ヘ音)にし、左右手を
     高さ基準で割り当てる。単一域の入力は1段のまま。曲名はmovement-titleへ。
     """
@@ -312,10 +317,19 @@ def to_score(
         score.insert(0, part.makeNotation(inPlace=False))
         return score
 
-    bpmeas = beats_per_measure or estimate_meter(list(notes))
-    ts = f"{bpmeas}/4"
-    notes = _drop_leading_silence(notes, bpmeas)
-    key = estimate_key(notes)
+    # 拍子: time_signature("6/8"等) > beats_per_measure(4→"4/4") > 自動推定。
+    # 表示は ts 文字列。小節長の計算は quarter 単位で行うため ts から算出する
+    # (例: 6/8 は 3 quarter/小節、4/4 は 4 quarter/小節)。
+    if time_signature:
+        ts = time_signature
+    elif beats_per_measure:
+        ts = f"{beats_per_measure}/4"
+    else:
+        ts = f"{estimate_meter(list(notes))}/4"
+    meas_q = int(music21.meter.TimeSignature(ts).barDuration.quarterLength)
+    notes = _drop_leading_silence(notes, meas_q)
+    # キーは指定があれば自動推定を上書き(分かる人は指定・任意)
+    key = music21.key.Key(key_tonic, key_mode) if key_tonic else estimate_key(notes)
     treble, bass = split_hands(notes)
     ref_end = _measure_ceil(
         max(
@@ -323,7 +337,7 @@ def to_score(
             + Fraction(float(n.dur_beats)).limit_denominator(12)
             for n in notes
         ),
-        bpmeas,
+        meas_q,
     )
 
     if treble and bass:

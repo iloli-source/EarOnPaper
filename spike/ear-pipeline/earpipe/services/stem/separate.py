@@ -104,12 +104,10 @@ def separate_stems(
         ) from e
 
     # Demucs の出力は out_dir/<model>/<trackname>/<stem>.wav
+    # モデルにより出力ステムが異なる(4-stem=vocals/drums/bass/other、
+    # 6-stem(htdemucs_6s)=+guitar/piano)ため、STEMS固定ではなく実出力のwavを全て拾う。
     track_dir = out_dir / model / in_path.stem
-    stems: dict[str, Path] = {}
-    for name in STEMS:
-        p = track_dir / f"{name}.wav"
-        if p.exists():
-            stems[name] = p
+    stems: dict[str, Path] = {p.stem: p for p in sorted(track_dir.glob("*.wav"))}
     if not stems:
         raise StemSeparationUnavailable(
             f"Demucs 出力が見つかりません(探索先: {track_dir})"
