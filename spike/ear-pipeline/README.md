@@ -42,6 +42,36 @@ python3.12 -m venv .venv312
 export EARPIPE_BP_PYTHON=/path/to/python3.12
 ```
 
+#### ステム分離（`--stem`）を使う場合のみ
+
+```bash
+# Demucs 用 venv（依存が重く衝突しやすいため別環境にする）
+python3 -m venv .venv-demucs
+.venv-demucs/bin/pip install demucs
+
+# または環境変数で既存の Python を指定
+export EARPIPE_DEMUCS_PYTHON=/path/to/python
+```
+
+> `.venv312` / `.venv-demucs` は **`spike/ear-pipeline` 直下に置けばエンジンが規約で自動検出**します（環境変数の明示指定は任意）。
+
+#### AI エージェントにセットアップさせる
+
+環境構築は **Claude Code / Cursor / Cline などの AI コーディングエージェントに丸ごと任せられます**。リポジトリを開いた状態で次のプロンプトを貼るだけです（AI が README と `requirements.txt` を読んで判断します）:
+
+```text
+spike/ear-pipeline の採譜エンジンを macOS/Linux で動くようにセットアップして。
+1. メインエンジン用 .venv を Python 3.12+ で作り requirements.txt を入れる
+2. 多声検出(--engine poly / auto)用 .venv312 を Python 3.12 で作り basic-pitch を入れる
+3. ステム分離(--stem)用 .venv-demucs を作り demucs を入れる
+4. 各 venv は spike/ear-pipeline 直下に置く（エンジンが規約で自動検出するため）
+5. 動作確認として下記を実行し、エラーが無く出力ファイルが生成されることを報告して:
+   .venv/bin/python -m earpipe.pipeline transcribe <サンプル音源> \
+     -o out.musicxml --pdf out.pdf --tab out_tab.pdf --stem other --engine poly
+```
+
+> **なぜ venv を 3 つに分けるか**: Basic Pitch は Python 3.12 専用、Demucs は依存が重く衝突しやすいため、メイン／多声検出／ステム分離をそれぞれ独立させています。mono 採譜だけなら `.venv` 1 つで動きます。
+
 ---
 
 ### 3. 採譜してみる
