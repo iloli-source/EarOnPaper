@@ -144,6 +144,12 @@ transcribe 音源 [オプション]
   --timing grid|raw      MIDI タイミング（grid=楽譜整合/既定、raw=実タイミング）
   --title TEXT           楽譜タイトル（省略時: ファイル名）
   --stem NAME            ステム分離して指定楽器だけ採譜（vocals/drums/bass/other・要Demucs）
+  --tab-mono             TAB譜を各拍の主旋律1音に絞る（多声ステム抽出時に演奏可能な単音TABにする）
+  --bpm N                テンポを数値で指定（自動検出を上書き）
+  --bpm-range LO-HI      テンポ範囲を指定 例:60-90（倍/半分の取り違えを範囲へ畳み込んで補正）
+  --beat 4/4|3/4|2/4     拍子を指定（自動検出を上書き）
+  --key TONIC            キーの主音を指定 例:C C# A（--mode と併用・自動検出を上書き）
+  --mode major|minor     キーの旋法（既定major）
   --format KEY[=PATH]    追加の出力形式（複数可）: jianpu/leadsheet/ust/abc/lilypond/gp5
   --analysis KEY[=PATH]  解析テキスト（複数可）: movable_do（移動ド）/roman（度数）/nashville
   --emit KEY[=PATH][#k=v] 実装機能のオプトイン副次出力（複数可）。既定の記譜出力は不変。
@@ -154,6 +160,8 @@ transcribe 音源 [オプション]
 `transcribe` 以外のサブコマンド:
 
 ```
+separate 音源 --out-dir DIR [--model M]  ステム分離のみ実行し各stemのwavパスをJSONで返す（採譜なし）。
+                                         既定 htdemucs_6s（ギター/ピアノも分離）。GUIの楽器選択用
 separate-transcribe 音源 --out-dir DIR   ステム分離して楽器毎に別譜面（F-003）
 chunk 音源 --out-dir DIR [--max-sec N]   長尺音源を無音優先で複数wavに分割（F-004）
 diff A音源 B音源 [-o FILE]               2音源を採譜し音符列の意味論的差分を出力
