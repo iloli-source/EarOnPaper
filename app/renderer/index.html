@@ -92,18 +92,23 @@
             <div class="result-card-title">エクスポート</div>
             <div class="export-buttons">
               <button class="btn-export" id="btn-export-pdf">
-                <span class="btn-export-icon">📄</span>PDF（楽譜）
+                <span class="btn-export-icon">📄</span>五線譜（PDF）
               </button>
-              <button class="btn-export" id="btn-export-musicxml">
+              <button class="btn-export" id="btn-export-tab">
+                <span class="btn-export-icon">🎸</span>TAB譜（PDF）
+              </button>
+              <!-- 一旦非表示(2026-07-22 ユーザー指示): まずは五線譜とTAB譜のみ表示。戻す時は hidden を外す -->
+              <button class="btn-export" id="btn-export-musicxml" hidden>
                 <span class="btn-export-icon">🎼</span>MusicXML
               </button>
-              <button class="btn-export" id="btn-export-midi">
+              <button class="btn-export" id="btn-export-midi" hidden>
                 <span class="btn-export-icon">🎹</span>MIDI
               </button>
             </div>
           </div>
 
-          <div class="result-card">
+          <!-- 一旦非表示(2026-07-22 ユーザー指示): まずは五線譜とTAB譜のみ。戻す時は hidden を外す -->
+          <div class="result-card" hidden>
             <div class="result-card-title">詳細エクスポート（音楽家向け）</div>
             <div class="export-buttons" id="extra-export-buttons">
               <button class="btn-export" data-extra="jianpu"><span class="btn-export-icon">🔢</span>簡譜（数字譜）</button>

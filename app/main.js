@@ -143,16 +143,24 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '
   const outMusicxml = path.join(tmpDir, `${baseName}.musicxml`)
   const outPdf = path.join(tmpDir, `${baseName}.pdf`)
   const outMidi = path.join(tmpDir, `${baseName}.mid`)
+  const outTab = path.join(tmpDir, `${baseName}.tab.pdf`)  // ギターTAB譜PDF(任意・採譜と同時生成)
 
   return new Promise((resolve, reject) => {
-    // auto=音源に応じてmono/poly自動選択(既定・#64) / mono / poly のみ許可
-    const selected = ['auto', 'mono', 'poly'].includes(engine) ? engine : 'auto'
+    // 一旦(2026-07-22 ユーザー指示): ギター/ピアノ抽出モード。
+    // Demucsで other ステム(専用ギターステムが無いためギター+ピアノ+その他が混在)を
+    // 分離し、poly(多声)で検出する。monoは多声ステムをほぼ拾えない(実測5音)ため poly 必須。
+    // TABは --tab-mono で各拍の主旋律1音に絞り、物理的に常に演奏可能な単音TABにする。
+    const STEM = 'other'
+    const selected = 'poly'
     const args = [
       '-W', 'ignore::RuntimeWarning',
       '-m', 'earpipe.pipeline', 'transcribe', inputPath,
       '-o', outMusicxml,
       '--pdf', outPdf,
       '--midi', outMidi,
+      '--tab', outTab,
+      '--tab-mono',
+      '--stem', STEM,
       '--engine', selected,
     ]
     const safeTitle = pu.clampTitle(title)  // 3.19: 200文字上限
@@ -201,9 +209,16 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '
       // PDF埋め込み用の file URL はメイン側(node:url あり)で作る。これにより
       // preload はローカルモジュール require が不要になり sandbox:true を維持できる。
       const pdfUrl = pathToFileURL(outPdf).href
-      // 3.8: 成果物の実体(存在・非空)を確認してから成功応答する
+      // 3.8: 成果物の実体(存在・非空)を確認してから成功応答する。
+      // TAB譜は任意出力: 生成できていれば paths.tab に載せる(失敗しても本体採譜は成功扱い)。
       ensureOutputs(paths)
-        .then(() => resolve({ ...result, paths, pdfUrl }))
+        .then(async () => {
+          try {
+            const tabStat = await fs.promises.stat(outTab)
+            if (tabStat.isFile() && tabStat.size > 0) paths.tab = outTab
+          } catch { /* TAB は任意: 無ければレンダラ側でボタン非表示 */ }
+          resolve({ ...result, paths, pdfUrl })
+        })
         .catch(reject)
     })
 

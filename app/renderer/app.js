@@ -251,6 +251,10 @@ function showResult(result) {
     scorePanel.appendChild(embed)
   }
 
+  // TAB譜は任意出力: 生成できたときだけボタンを表示する
+  const tabBtn = document.getElementById('btn-export-tab')
+  if (tabBtn) tabBtn.hidden = !result.paths?.tab
+
   showState('done')
 }
 
@@ -259,6 +263,12 @@ document.getElementById('btn-export-pdf').addEventListener('click', async () => 
   if (!currentResult?.paths?.pdf) return
   const name = window.earpipe.basenameForDisplay(currentResult.paths.pdf)
   await window.earpipe.saveFile(currentResult.paths.pdf, 'pdf', name)
+})
+
+document.getElementById('btn-export-tab').addEventListener('click', async () => {
+  if (!currentResult?.paths?.tab) return
+  const name = window.earpipe.basenameForDisplay(currentResult.paths.tab)
+  await window.earpipe.saveFile(currentResult.paths.tab, 'pdf', name)
 })
 
 document.getElementById('btn-export-musicxml').addEventListener('click', async () => {
