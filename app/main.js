@@ -423,7 +423,7 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-'))
   registerRoot(tmpDir, inputPath)  // 入力単位で追跡し、切替時にも削除
-  const baseName = path.basename(inputPath, path.extname(inputPath))
+  const baseName = pu.snakeFileStem(path.basename(inputPath, path.extname(inputPath)))
   const outMusicxml = path.join(tmpDir, `${baseName}.musicxml`)
   const outPdf = path.join(tmpDir, `${baseName}.pdf`)
   const outMidi = path.join(tmpDir, `${baseName}.mid`)
@@ -643,12 +643,15 @@ ipcMain.handle('transcribe-stem', async (event, inputPath, stemId, title = '', o
   const hasTab = !!meta.hasTab
 
   const outDir = registerRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-stem-')), inputPath)
-  const outMusicxml = path.join(outDir, `${stemId}.musicxml`)
-  const outPdf = path.join(outDir, `${stemId}.pdf`)
-  const outMidi = path.join(outDir, `${stemId}.mid`)
-  const outTab = path.join(outDir, `${stemId}.tab.pdf`)
-  const outChordChart = path.join(outDir, `${stemId}.chord.pdf`)  // #123/#116: コード譜(一次導線)
-  const outConfView = path.join(outDir, `${stemId}.confview.pdf`)  // #121: 信頼度ハイライト＋波形
+  // #135追補: 生成ファイル自体を曲名入りスネーク名にする。PDFビューアのDLボタン等、
+  // エクスポートボタン以外の保存経路でも初期名に曲名が入るようにする。
+  const nameStem = pu.snakeFileStem(pu.clampTitle(title))
+  const outMusicxml = path.join(outDir, `${nameStem}_${stemId}.musicxml`)
+  const outPdf = path.join(outDir, `${nameStem}_${stemId}_score.pdf`)
+  const outMidi = path.join(outDir, `${nameStem}_${stemId}.mid`)
+  const outTab = path.join(outDir, `${nameStem}_${stemId}_tab.pdf`)
+  const outChordChart = path.join(outDir, `${nameStem}_${stemId}_chord.pdf`)  // #123/#116: コード譜(一次導線)
+  const outConfView = path.join(outDir, `${nameStem}_${stemId}_analysis.pdf`)  // #121: 信頼度ハイライト＋波形
 
   // 分離済みwavを直接採譜(--stem 指定なし=二重分離を避ける)。engine auto。
   // ギター(other)は TAB も単旋律で生成する。コード譜は一次導線として常時生成する。
