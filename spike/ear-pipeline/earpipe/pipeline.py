@@ -31,6 +31,8 @@ from earpipe.services.notate import (
     write_pdf,
     write_tab_pdf,
 )
+from earpipe.services.notate.chord import estimate_chords
+from earpipe.services.notate.chordchart import render_chordchart_pdf
 from earpipe.services.emitters import (
     EmitContext,
     default_emit_path,
@@ -100,6 +102,7 @@ def transcribe_file(
     out_pdf: str | Path | None = None,
     out_tab: str | Path | None = None,
     out_tab_plain: str | Path | None = None,
+    out_chordchart: str | Path | None = None,
     engine: str = "auto",
     sensitivity: str = "auto",
     postfilter: bool = False,
@@ -318,6 +321,19 @@ def transcribe_file(
             notes, bpm, out_tab_plain, title=title or Path(in_path_orig).stem,
             chord_diagrams=False,
         )
+    if out_chordchart:
+        # コード譜専用ビュー(#123): コードネーム＋押さえ図＋メロディ音名行。
+        # TAB/五線譜と独立に生成でき、『TABよりコード譜派』向けの一次出力候補。
+        chords = estimate_chords(notes, bpm)
+        cc_path = render_chordchart_pdf(
+            notes, chords, bpm, out_chordchart,
+            title=title or Path(in_path_orig).stem,
+        )
+        # result は JSON 化されるため Path は str で格納する(他出力と同形)。
+        result["chord_chart"] = {
+            "path": str(cc_path),
+            "n_chords": sum(1 for c in chords if c.name != "N.C."),
+        }
 
     # 出力形式ディスパッチ(#109): FORMAT_REGISTRY 登録の非レガシー形式
     # (簡譜/リードシート/GP5/UST/ABC/LilyPond)を --format 経由で生成する。
@@ -476,6 +492,10 @@ def main(argv: list[str] | None = None) -> int:
     pt.add_argument("--tab", help="ギターTAB譜PDF出力先(任意。6弦標準EADGBE・NF-045)")
     pt.add_argument("--tab-plain", dest="tab_plain", help="押さえ図なしTAB(コードネームのみ)の出力先(任意)")
     pt.add_argument(
+        "--chord-chart", dest="chord_chart",
+        help="コード譜(コードネーム＋押さえ図＋メロディ音名)PDF出力先(任意・#123)",
+    )
+    pt.add_argument(
         "--tab-mono", dest="tab_mono", action="store_true",
         help="TAB譜を各拍の主旋律1音に絞る(多声ステム抽出時に演奏可能な単音TABにする)",
     )
@@ -622,6 +642,7 @@ def main(argv: list[str] | None = None) -> int:
         out_pdf=args.pdf,
         out_tab=args.tab,
         out_tab_plain=args.tab_plain,
+        out_chordchart=args.chord_chart,
         chord_diagrams=args.chord_diagrams,
         tab_monophonic=args.tab_mono,
         bpm_override=args.bpm,
