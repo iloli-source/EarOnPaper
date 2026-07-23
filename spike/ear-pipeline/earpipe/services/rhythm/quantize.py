@@ -196,14 +196,22 @@ def _best_system(
     bpm_max: float,
 ) -> tuple[float | None, float]:
     """指定格子系を全BPMスキャンし (bpm, total) を返す。2分系/3分系を同一ロジックで
-    対称評価するためのヘルパ。格子で説明できない(最良fit<MIN_FIT)なら (None, 0.0)。"""
+    対称評価するためのヘルパ。格子で説明できない(最良fit<MIN_FIT)なら (None, 0.0)。
+
+    候補選択は total(fit×音価妥当×事前分布) を fit≥MIN_FIT の全BPMで直接最大化する。
+    旧実装の「最良fit−FIT_BAND帯」前置フィルタは廃止(#118/#124 根治 2026-07-23):
+    _grid_fit はずれを格子幅比で正規化するため、同じ演奏でも粗い格子(遅いBPM)ほど
+    オンセットジッタに寛容でfitが高く出る。fitはBPM間で比較可能でないのに帯で
+    絞ると、正解テンポ(細かい格子でfitが相対的に低い)が候補から除外され、
+    4分@120の曲が(80BPM,三連格子)へ誤爆していた(かえるのうた実測: 正解120×16分
+    fit=0.727 / 誤80×3連 fit=0.863・IOIジッタ平均8.5ms)。fitの寄与はtotalの積の
+    中で維持されるため、低fit候補が事前分布だけで勝つことはない。"""
     bpms = np.arange(bpm_min, bpm_max + 0.25, 0.5)
     fits = {float(b): _grid_fit(iois, float(b), grid_per_beat) for b in bpms}
-    best_fit = max(fits.values())
-    if best_fit < MIN_FIT:
+    if max(fits.values()) < MIN_FIT:
         return None, 0.0
-    band = [b for b, f in fits.items() if f >= best_fit - FIT_BAND]
-    bpm = max(band, key=lambda b: _system_total(iois, b, grid_per_beat, subdiv_centers))
+    cands = [b for b, f in fits.items() if f >= MIN_FIT]
+    bpm = max(cands, key=lambda b: _system_total(iois, b, grid_per_beat, subdiv_centers))
     return bpm, _system_total(iois, bpm, grid_per_beat, subdiv_centers)
 
 
@@ -251,11 +259,11 @@ def estimate_grid(
         return bpm_d, GRID_PER_BEAT
 
     # 三連採用: オッカム減点つきで total_t が total_d を上回るとき(従来semantics)。
-    # 注(2026-07-23 実測): fit/evidence ベースの追加判別ゲートは試作したが、実音声では
-    # 本物三連(Romanze の三連特有位置集中=0.22)を偽三連(furusato=0.50)より低く評価し、
-    # Romanze を2分系へ退行させる欠陥があった(MIDIベースのテストは通るが音声で退行=偽成功)。
-    # 誤三連(かえるのうた等)の根本原因はテンポのオクターブ外し＋オンセットジッタで、
-    # 格子選択層の後付け判別では解けない(accuracy-improvement-roadmap.md 参照)。
+    # 履歴(2026-07-23): fit/evidence ベースの追加判別ゲートは試作したが、実音声では
+    # 本物三連(Romanze)を偽三連(furusato)より低く評価しRomanzeを退行させたため不採用。
+    # 誤三連(かえるのうた等)の真因は後付け判別でなく _best_system の FIT_BAND 前置
+    # フィルタ(粗い格子ほどジッタでfitが高く出る非対称性で正解テンポを候補から除外)
+    # であり、同日の #118/#124 修正で根治した(_best_system docstring 参照)。
     if TRIPLET_PENALTY * total_t > total_d:
         return bpm_t, TRIPLET_GRID_PER_BEAT
     return bpm_d, GRID_PER_BEAT

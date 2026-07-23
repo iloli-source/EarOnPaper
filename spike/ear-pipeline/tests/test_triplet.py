@@ -72,6 +72,44 @@ class TestTripletGrid:
             assert n.dur_beats >= 1.0 / 3.0 - 1e-9
 
 
+class TestJitteredDupleGuard:
+    """#118/#124 再発防止: 実採譜相当のオンセットジッタを載せた2分系(4分中心)の曲が
+    三連格子・遅テンポへ誤爆しないこと。
+
+    実測(かえるのうた合成音声・2026-07-23): pYIN経由のIOIジッタは平均8.5ms。
+    旧実装は FIT_BAND の前置フィルタが「粗い格子ほどジッタに寛容でfitが高く出る」
+    非対称性により正解BPM(120)を2分系候補から除外し、(80, 3)=全音符三連化を返していた。
+    """
+
+    def kaeru_like_events(self, bpm: float = 120.0, jitter_ms: float = 10.0) -> list[PitchEvent]:
+        """かえるのうた型: 4分主体＋休符跨ぎIOI(2拍)＋8分1小節。決定的ジッタつき。"""
+        import numpy as np
+
+        spb = 60.0 / bpm
+        beats = [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14,
+                 16, 18, 20, 22,
+                 24, 24.5, 25, 25.5, 26, 26.5, 27, 27.5,
+                 28, 29, 30]
+        rng = np.random.default_rng(42)
+        evs = []
+        for i, b in enumerate(beats):
+            t = b * spb + float(rng.uniform(-jitter_ms, jitter_ms)) / 1000.0
+            evs.append(PitchEvent(t, t + 0.2, 60 + (i % 5) * 2, 0.9))
+        return evs
+
+    def test_jittered_quarters_stay_duple(self):
+        # Act
+        est_bpm, gpb = estimate_grid(self.kaeru_like_events())
+        # Assert: 2分系・テンポ±5%
+        assert gpb == 4, f"三連格子へ誤爆: got ({est_bpm}, {gpb})"
+        assert abs(est_bpm - 120) <= 6, f"テンポ誤り: got {est_bpm}"
+
+    def test_jitter_free_quarters_stay_duple(self):
+        # ジッタゼロでも同じ選択であること(修正が理想入力を壊さない)
+        est_bpm, gpb = estimate_grid(self.kaeru_like_events(jitter_ms=0.0))
+        assert gpb == 4 and abs(est_bpm - 120) <= 6
+
+
 class TestRealSongs:
     @pytest.mark.skipif(not ROMANZE.exists(), reason="pd-corpus未取得環境")
     def test_romanze_tempo_within_5pct(self):
