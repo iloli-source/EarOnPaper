@@ -147,6 +147,36 @@ def test_transcribe_emit_outputs_are_generated(simple_wav, tmp_path):
         assert out.stat().st_size > 0, f"{out.name} が空"
 
 
+def test_transcribe_emit_confview_with_leading_silence(simple_wav, tmp_path):
+    """#126 再発防止: 先頭無音つき音源でも audio 必要エミッタ(confview)が成功する。
+
+    先頭無音があるとトリムで一時wavが作られ in_path が差し替わるが、一時wavが
+    エミッタ実行前に削除されると FileNotFoundError でエンジンが code 1 終了する
+    (実MP3のユーザーテストで顕在化)。一時ファイルは全ディスパッチ完了まで生存すること。
+    """
+    import numpy as np
+    import soundfile as sf
+
+    # Arrange: 既存合成メロディの先頭に1秒の無音を付けてトリム経路を必ず通す
+    wav_path, _melody, _bpm = simple_wav
+    y, sr = sf.read(str(wav_path), dtype="float32")
+    padded = tmp_path / "padded.wav"
+    sf.write(str(padded), np.concatenate([np.zeros(sr, dtype=np.float32), y]), sr)
+    out_xml = tmp_path / "c.musicxml"
+    confview_out = tmp_path / "confview.pdf"
+
+    # Act
+    rc = pipeline.main(
+        ["transcribe", str(padded), "-o", str(out_xml), "--engine", "mono",
+         "--emit", f"confview={confview_out}"]
+    )
+
+    # Assert: 成功し解析ビューPDFが非空で生成される
+    assert rc == 0
+    assert confview_out.is_file(), "confview が生成されていない"
+    assert confview_out.stat().st_size > 0, "confview が空"
+
+
 def test_transcribe_gp5_format_is_generated(simple_wav, tmp_path):
     """#113 修正後: --format gp5 が e2e で非空の .gp5 を実生成する(クラッシュしない)。
 

@@ -149,243 +149,249 @@ def transcribe_file(
     # 分離wavは一時ディレクトリに出力し、本関数終了時に片付ける。
     stem_tmp_dir = None
     stem_used = None
-    if stem is not None:
-        if stem not in STEMS:
-            raise ValueError(f"--stem は {STEMS} のいずれか(指定: {stem!r})")
-        stem_tmp_dir = Path(tempfile.mkdtemp(prefix="earpipe_stem_"))
-        result_sep = separate_stems(in_path, stem_tmp_dir)
-        if stem not in result_sep.stems:
-            raise ValueError(f"ステム {stem!r} が分離結果に存在しません")
-        in_path = result_sep.stems[stem]
-        stem_used = stem
+    trim_tmp = None
+    tuned_tmp = None
+    try:
+        if stem is not None:
+            if stem not in STEMS:
+                raise ValueError(f"--stem は {STEMS} のいずれか(指定: {stem!r})")
+            stem_tmp_dir = Path(tempfile.mkdtemp(prefix="earpipe_stem_"))
+            result_sep = separate_stems(in_path, stem_tmp_dir)
+            if stem not in result_sep.stems:
+                raise ValueError(f"ステム {stem!r} が分離結果に存在しません")
+            in_path = result_sep.stems[stem]
+            stem_used = stem
 
-    # 先頭無音トリム: 曲前の無音は楽譜の頭を休符にして精度を落とすため、
-    # 音が鳴ったところから採譜する(ユーザー実証 2026-07-20: 0.67秒カットで精度向上)。
-    # カットがあった場合のみ一時wavが作られ、本関数終了時に削除する。
-    trimmed_path, trimmed_sec = trim_leading_silence_file(in_path)
-    trim_tmp = trimmed_path if trimmed_path != Path(in_path_orig) else None
+        # 先頭無音トリム: 曲前の無音は楽譜の頭を休符にして精度を落とすため、
+        # 音が鳴ったところから採譜する(ユーザー実証 2026-07-20: 0.67秒カットで精度向上)。
+        # カットがあった場合のみ一時wavが作られ、本関数終了時に削除する。
+        trimmed_path, trimmed_sec = trim_leading_silence_file(in_path)
+        trim_tmp = trimmed_path if trimmed_path != Path(in_path_orig) else None
 
-    # C1基準ピッチ補正(#55): A=440から8cents以上ずれていれば補正済み一時wavに差し替える
-    # (in-tune入力は無補正パススルー)。一時ファイルは本関数終了時に削除する。
-    # 削除対象は「補正で新規作成された一時ファイル」のみ。str/Path混在でも
-    # 入力ファイル本体を誤って消さないよう、実体パスの一致で判定する(修正済みバグ)
-    corrected_path, tuning_offset = correct_tuning_file(trimmed_path)
-    tuned_tmp = corrected_path if corrected_path != trimmed_path else None
-    in_path = corrected_path
+        # C1基準ピッチ補正(#55): A=440から8cents以上ずれていれば補正済み一時wavに差し替える
+        # (in-tune入力は無補正パススルー)。一時ファイルは本関数終了時に削除する。
+        # 削除対象は「補正で新規作成された一時ファイル」のみ。str/Path混在でも
+        # 入力ファイル本体を誤って消さないよう、実体パスの一致で判定する(修正済みバグ)
+        corrected_path, tuning_offset = correct_tuning_file(trimmed_path)
+        tuned_tmp = corrected_path if corrected_path != trimmed_path else None
+        in_path = corrected_path
 
-    analysis = None
-    y_loaded = None
-    if field_mode:
-        y_loaded, sr_loaded = load_audio(in_path)
-        analysis = analyze_field(y_loaded, sr_loaded)
-
-    # エンジン自動選択(#64): 混合音源はmono(pYIN単旋律)だとほぼ拾えず、純単旋律は
-    # poly(basic-pitch)だとオクターブ倍音を誤検出する。音源のポリフォニーを推定して
-    # 切り替える。先に安価なmono検出を回し、被覆率も判定材料にする。
-    engine_choice = None
-    resolved_engine = engine
-    mono_events_cache = None
-    if engine == "auto":
-        if y_loaded is not None:
-            y, sr = y_loaded, sr_loaded
-        else:
-            y, sr = load_audio(in_path)
+        analysis = None
+        y_loaded = None
         if field_mode:
-            y = denoise(y, sr)
-        mono_events_cache = detect_events(y, sr)
-        engine_choice = choose_engine(
-            y, sr, mono_events_cache, poly_available=bp_python_path() is not None
-        )
-        resolved_engine = engine_choice.engine
+            y_loaded, sr_loaded = load_audio(in_path)
+            analysis = analyze_field(y_loaded, sr_loaded)
 
-    adaptive_report = None
-    if resolved_engine == "poly":
-        if sensitivity == "auto":
-            selection = detect_events_adaptive(in_path)
-            events = selection.events
-            adaptive_report = {
-                "profile": selection.profile,
-                "ratio": round(selection.ratio, 3) if selection.ratio != float("inf") else "inf",
-                "n_normal": selection.n_normal,
-                "n_high": selection.n_high,
-            }
-        else:
-            events = detect_events_poly(in_path, sensitivity=sensitivity)
-        if postfilter:
-            events = apply_postfilter(events)
-    elif mono_events_cache is not None:
-        # auto選択でmonoに決まった場合は再検出せず流用する(二重検出回避)
-        events = mono_events_cache
-    else:
-        # field_mode時は分析でロード済みの波形を再利用する(二重ロード回避)
-        if y_loaded is not None:
-            y, sr = y_loaded, sr_loaded
-        else:
-            y, sr = load_audio(in_path)
-        if field_mode:
-            y = denoise(y, sr)
-        events = detect_events(y, sr)
-
-    if analysis is not None:
-        events = select_events(events, analysis.snr_db)
-
-    if events:
-        bpm, grid_per_beat = estimate_grid(events)  # 格子系(2分/3分)も同時推定(#39)
-        bpm = _apply_bpm_override(bpm, bpm_override, bpm_range)  # 任意上書き
-        notes = quantize_events(
-            events, bpm, mono=(resolved_engine == "mono"), grid_per_beat=grid_per_beat
-        )
-        # 記譜アンカー: フェードイン等でトリムが届かない残り無音が先頭休符に
-        # ならないよう、最初の音符を0拍目に揃える(格子側のみ。実タイミング保持)
-        notes, anchored_lead_beats = anchor_to_zero(notes)
-    else:
-        bpm = _apply_bpm_override(BPM_DEFAULT, bpm_override, bpm_range)
-        grid_per_beat = GRID_PER_BEAT
-        notes = []
-        anchored_lead_beats = 0.0
-
-    # 曲名メタデータの貫通(#42): 未指定なら入力ファイル名を使う。
-    # in_path はトリム/補正後の一時ファイルを指すため、必ず元入力名(in_path_orig)を使う
-    # (バグ修正: 一時ファイル名 earpipe_xxxx_trimmed が譜面タイトルに漏れていた)
-    base_title = title or Path(in_path_orig).stem
-    # ステム分離時はどの楽器の譜面か分かるようステム名を併記する
-    effective_title = f"{base_title} ({stem_used})" if stem_used else base_title
-    score = to_score(
-        notes, bpm, title=effective_title,
-        beats_per_measure=beats_per_measure,
-        time_signature=time_signature,
-        key_tonic=key_tonic, key_mode=key_mode,
-    )
-    if out_musicxml:
-        write_musicxml(score, out_musicxml)  # 譜面は常に格子側(楽譜=量子化表現)
-    if out_midi:
-        # C3二重表現(Issue #38): MIDIエクスポートは grid(格子) / raw(実タイミング) を選択可能
-        if timing == "raw":
-            write_midi_raw(notes, out_midi, bpm=bpm)
-        else:
-            write_midi(score, out_midi)
-
-    if tuned_tmp is not None:
-        tuned_tmp.unlink(missing_ok=True)
-    if trim_tmp is not None:
-        trim_tmp.unlink(missing_ok=True)
-    if stem_tmp_dir is not None:
-        shutil.rmtree(stem_tmp_dir, ignore_errors=True)
-
-    result = {
-        "input": str(in_path_orig),
-        "stem": stem_used,
-        "trimmed_leading_sec": round(trimmed_sec, 3),
-        "anchored_lead_beats": round(anchored_lead_beats, 3),
-        "tuning_offset_cents": round(tuning_offset, 1),
-        "engine": resolved_engine,
-        "engine_requested": engine,
-        "n_events": len(events),
-        "n_notes": len(notes),
-        "bpm": bpm,
-        "grid_per_beat": grid_per_beat,
-        # C2区間別テンポ系列(#56): 分析出力として先行提供。記譜は単一テンポ格子
-        # (区間別格子での記譜は将来課題。tempo_map.py docstring参照)
-        "tempo_map": [
-            [round(s.start_sec, 3), s.bpm] for s in estimate_tempo_map(events)
-        ],
-        "timing": timing,
-        "notes": notes,
-    }
-    if engine_choice is not None:
-        result["engine_select"] = {
-            "engine": engine_choice.engine,
-            "polyphony": engine_choice.polyphony,
-            "mono_coverage": engine_choice.mono_coverage,
-            "poly_available": engine_choice.poly_available,
-            "fell_back": engine_choice.fell_back,
-            "reason": engine_choice.reason,
-        }
-    if adaptive_report is not None:
-        result["adaptive"] = adaptive_report
-    if analysis is not None:
-        result["field_report"] = asdict(analysis.report)
-    if out_pdf:
-        if not out_musicxml:
-            raise ValueError("--pdf にはMusicXML出力(-o)が必要")
-        result["engrave"] = write_pdf(out_musicxml, out_pdf)
-    if out_tab:
-        # TAB譜出力プロファイル(NF-045)。五線譜と独立に生成できる
-        result["tab"] = write_tab_pdf(
-            notes, bpm, out_tab, title=title or Path(in_path_orig).stem,
-            chord_diagrams=chord_diagrams, monophonic=tab_monophonic,
-        )
-    if out_tab_plain:
-        # 押さえ図なし版（コードネームのみ）。ビューアのトグル用に同時生成
-        result["tab_plain"] = write_tab_pdf(
-            notes, bpm, out_tab_plain, title=title or Path(in_path_orig).stem,
-            chord_diagrams=False,
-        )
-    if out_chordchart:
-        # コード譜専用ビュー(#123): コードネーム＋押さえ図＋メロディ音名行。
-        # TAB/五線譜と独立に生成でき、『TABよりコード譜派』向けの一次出力候補。
-        chords = estimate_chords(notes, bpm)
-        cc_path = render_chordchart_pdf(
-            notes, chords, bpm, out_chordchart,
-            title=title or Path(in_path_orig).stem,
-        )
-        # result は JSON 化されるため Path は str で格納する(他出力と同形)。
-        result["chord_chart"] = {
-            "path": str(cc_path),
-            "n_chords": sum(1 for c in chords if c.name != "N.C."),
-        }
-
-    # 出力形式ディスパッチ(#109): FORMAT_REGISTRY 登録の非レガシー形式
-    # (簡譜/リードシート/GP5/UST/ABC/LilyPond)を --format 経由で生成する。
-    # 五線譜/MIDI/PDF/TAB は上の専用オプションが担うため対象外。
-    if formats:
-        ctx = DispatchContext(
-            notes=notes,
-            bpm=bpm,
-            title=effective_title,
-            musicxml_path=Path(out_musicxml) if out_musicxml else None,
-        )
-        outputs = []
-        for key, fmt_out in formats:
-            path, meta = dispatch_format(key, ctx, fmt_out)
-            outputs.append(
-                {
-                    "key": key,
-                    "path": str(path),
-                    "lossy": meta.lossy,
-                    "lossy_note": meta.lossy_note,  # F-104: lossy を隠さない
-                }
+        # エンジン自動選択(#64): 混合音源はmono(pYIN単旋律)だとほぼ拾えず、純単旋律は
+        # poly(basic-pitch)だとオクターブ倍音を誤検出する。音源のポリフォニーを推定して
+        # 切り替える。先に安価なmono検出を回し、被覆率も判定材料にする。
+        engine_choice = None
+        resolved_engine = engine
+        mono_events_cache = None
+        if engine == "auto":
+            if y_loaded is not None:
+                y, sr = y_loaded, sr_loaded
+            else:
+                y, sr = load_audio(in_path)
+            if field_mode:
+                y = denoise(y, sr)
+            mono_events_cache = detect_events(y, sr)
+            engine_choice = choose_engine(
+                y, sr, mono_events_cache, poly_available=bp_python_path() is not None
             )
-        result["formats"] = outputs
+            resolved_engine = engine_choice.engine
 
-    # 解析テキスト出力ディスパッチ(#109 B-2a): 移動ド(F-100)/ローマ数字度数・
-    # ナッシュビル(F-091)は登録簿の「形式」ではなく採譜結果の派生注釈。--analysis 経由。
-    if analyses:
-        actx = AnalysisContext(notes=notes, bpm=bpm)
-        analysis_outputs = []
-        for key, ana_out in analyses:
-            path = dispatch_analysis(key, actx, ana_out)
-            analysis_outputs.append({"key": key, "path": str(path)})
-        result["analyses"] = analysis_outputs
+        adaptive_report = None
+        if resolved_engine == "poly":
+            if sensitivity == "auto":
+                selection = detect_events_adaptive(in_path)
+                events = selection.events
+                adaptive_report = {
+                    "profile": selection.profile,
+                    "ratio": round(selection.ratio, 3) if selection.ratio != float("inf") else "inf",
+                    "n_normal": selection.n_normal,
+                    "n_high": selection.n_high,
+                }
+            else:
+                events = detect_events_poly(in_path, sensitivity=sensitivity)
+            if postfilter:
+                events = apply_postfilter(events)
+        elif mono_events_cache is not None:
+            # auto選択でmonoに決まった場合は再検出せず流用する(二重検出回避)
+            events = mono_events_cache
+        else:
+            # field_mode時は分析でロード済みの波形を再利用する(二重ロード回避)
+            if y_loaded is not None:
+                y, sr = y_loaded, sr_loaded
+            else:
+                y, sr = load_audio(in_path)
+            if field_mode:
+                y = denoise(y, sr)
+            events = detect_events(y, sr)
 
-    # 汎用エミッタ(#109 B-2): 孤立実装済み機能をオプトインで副次出力する。
-    # 既定の五線譜/MIDI/PDF/TAB 出力は変えない(既存挙動不変)。
-    if emits:
-        ectx = EmitContext(
-            notes=notes,
-            bpm=bpm,
-            title=effective_title,
-            musicxml_path=Path(out_musicxml) if out_musicxml else None,
-            audio_path=Path(in_path),
+        if analysis is not None:
+            events = select_events(events, analysis.snr_db)
+
+        if events:
+            bpm, grid_per_beat = estimate_grid(events)  # 格子系(2分/3分)も同時推定(#39)
+            bpm = _apply_bpm_override(bpm, bpm_override, bpm_range)  # 任意上書き
+            notes = quantize_events(
+                events, bpm, mono=(resolved_engine == "mono"), grid_per_beat=grid_per_beat
+            )
+            # 記譜アンカー: フェードイン等でトリムが届かない残り無音が先頭休符に
+            # ならないよう、最初の音符を0拍目に揃える(格子側のみ。実タイミング保持)
+            notes, anchored_lead_beats = anchor_to_zero(notes)
+        else:
+            bpm = _apply_bpm_override(BPM_DEFAULT, bpm_override, bpm_range)
+            grid_per_beat = GRID_PER_BEAT
+            notes = []
+            anchored_lead_beats = 0.0
+
+        # 曲名メタデータの貫通(#42): 未指定なら入力ファイル名を使う。
+        # in_path はトリム/補正後の一時ファイルを指すため、必ず元入力名(in_path_orig)を使う
+        # (バグ修正: 一時ファイル名 earpipe_xxxx_trimmed が譜面タイトルに漏れていた)
+        base_title = title or Path(in_path_orig).stem
+        # ステム分離時はどの楽器の譜面か分かるようステム名を併記する
+        effective_title = f"{base_title} ({stem_used})" if stem_used else base_title
+        score = to_score(
+            notes, bpm, title=effective_title,
+            beats_per_measure=beats_per_measure,
+            time_signature=time_signature,
+            key_tonic=key_tonic, key_mode=key_mode,
         )
-        emit_outputs = []
-        for key, emit_out, params in emits:
-            ctx_with_params = replace(ectx, params=params)
-            path = run_emit(key, ctx_with_params, emit_out)
-            emit_outputs.append({"key": key, "path": str(path)})
-        result["emits"] = emit_outputs
+        if out_musicxml:
+            write_musicxml(score, out_musicxml)  # 譜面は常に格子側(楽譜=量子化表現)
+        if out_midi:
+            # C3二重表現(Issue #38): MIDIエクスポートは grid(格子) / raw(実タイミング) を選択可能
+            if timing == "raw":
+                write_midi_raw(notes, out_midi, bpm=bpm)
+            else:
+                write_midi(score, out_midi)
 
-    return result
+        result = {
+            "input": str(in_path_orig),
+            "stem": stem_used,
+            "trimmed_leading_sec": round(trimmed_sec, 3),
+            "anchored_lead_beats": round(anchored_lead_beats, 3),
+            "tuning_offset_cents": round(tuning_offset, 1),
+            "engine": resolved_engine,
+            "engine_requested": engine,
+            "n_events": len(events),
+            "n_notes": len(notes),
+            "bpm": bpm,
+            "grid_per_beat": grid_per_beat,
+            # C2区間別テンポ系列(#56): 分析出力として先行提供。記譜は単一テンポ格子
+            # (区間別格子での記譜は将来課題。tempo_map.py docstring参照)
+            "tempo_map": [
+                [round(s.start_sec, 3), s.bpm] for s in estimate_tempo_map(events)
+            ],
+            "timing": timing,
+            "notes": notes,
+        }
+        if engine_choice is not None:
+            result["engine_select"] = {
+                "engine": engine_choice.engine,
+                "polyphony": engine_choice.polyphony,
+                "mono_coverage": engine_choice.mono_coverage,
+                "poly_available": engine_choice.poly_available,
+                "fell_back": engine_choice.fell_back,
+                "reason": engine_choice.reason,
+            }
+        if adaptive_report is not None:
+            result["adaptive"] = adaptive_report
+        if analysis is not None:
+            result["field_report"] = asdict(analysis.report)
+        if out_pdf:
+            if not out_musicxml:
+                raise ValueError("--pdf にはMusicXML出力(-o)が必要")
+            result["engrave"] = write_pdf(out_musicxml, out_pdf)
+        if out_tab:
+            # TAB譜出力プロファイル(NF-045)。五線譜と独立に生成できる
+            result["tab"] = write_tab_pdf(
+                notes, bpm, out_tab, title=title or Path(in_path_orig).stem,
+                chord_diagrams=chord_diagrams, monophonic=tab_monophonic,
+            )
+        if out_tab_plain:
+            # 押さえ図なし版（コードネームのみ）。ビューアのトグル用に同時生成
+            result["tab_plain"] = write_tab_pdf(
+                notes, bpm, out_tab_plain, title=title or Path(in_path_orig).stem,
+                chord_diagrams=False,
+            )
+        if out_chordchart:
+            # コード譜専用ビュー(#123): コードネーム＋押さえ図＋メロディ音名行。
+            # TAB/五線譜と独立に生成でき、『TABよりコード譜派』向けの一次出力候補。
+            chords = estimate_chords(notes, bpm)
+            cc_path = render_chordchart_pdf(
+                notes, chords, bpm, out_chordchart,
+                title=title or Path(in_path_orig).stem,
+            )
+            # result は JSON 化されるため Path は str で格納する(他出力と同形)。
+            result["chord_chart"] = {
+                "path": str(cc_path),
+                "n_chords": sum(1 for c in chords if c.name != "N.C."),
+            }
+
+        # 出力形式ディスパッチ(#109): FORMAT_REGISTRY 登録の非レガシー形式
+        # (簡譜/リードシート/GP5/UST/ABC/LilyPond)を --format 経由で生成する。
+        # 五線譜/MIDI/PDF/TAB は上の専用オプションが担うため対象外。
+        if formats:
+            ctx = DispatchContext(
+                notes=notes,
+                bpm=bpm,
+                title=effective_title,
+                musicxml_path=Path(out_musicxml) if out_musicxml else None,
+            )
+            outputs = []
+            for key, fmt_out in formats:
+                path, meta = dispatch_format(key, ctx, fmt_out)
+                outputs.append(
+                    {
+                        "key": key,
+                        "path": str(path),
+                        "lossy": meta.lossy,
+                        "lossy_note": meta.lossy_note,  # F-104: lossy を隠さない
+                    }
+                )
+            result["formats"] = outputs
+
+        # 解析テキスト出力ディスパッチ(#109 B-2a): 移動ド(F-100)/ローマ数字度数・
+        # ナッシュビル(F-091)は登録簿の「形式」ではなく採譜結果の派生注釈。--analysis 経由。
+        if analyses:
+            actx = AnalysisContext(notes=notes, bpm=bpm)
+            analysis_outputs = []
+            for key, ana_out in analyses:
+                path = dispatch_analysis(key, actx, ana_out)
+                analysis_outputs.append({"key": key, "path": str(path)})
+            result["analyses"] = analysis_outputs
+
+        # 汎用エミッタ(#109 B-2): 孤立実装済み機能をオプトインで副次出力する。
+        # 既定の五線譜/MIDI/PDF/TAB 出力は変えない(既存挙動不変)。
+        if emits:
+            ectx = EmitContext(
+                notes=notes,
+                bpm=bpm,
+                title=effective_title,
+                musicxml_path=Path(out_musicxml) if out_musicxml else None,
+                audio_path=Path(in_path),
+            )
+            emit_outputs = []
+            for key, emit_out, params in emits:
+                ctx_with_params = replace(ectx, params=params)
+                path = run_emit(key, ctx_with_params, emit_out)
+                emit_outputs.append({"key": key, "path": str(path)})
+            result["emits"] = emit_outputs
+
+        return result
+    finally:
+        # 一時ファイル(トリム/補正wav・ステムdir)の後始末(#126)。エミッタが
+        # audio_path 経由で参照するため、formats/analyses/emits の全ディスパッチが
+        # 終わる関数脱出時まで生かす。try/finally なので途中エラーでもリークしない。
+        if tuned_tmp is not None:
+            tuned_tmp.unlink(missing_ok=True)
+        if trim_tmp is not None:
+            trim_tmp.unlink(missing_ok=True)
+        if stem_tmp_dir is not None:
+            shutil.rmtree(stem_tmp_dir, ignore_errors=True)
 
 
 _ALLOWED_BEATS = ("2/4", "3/4", "4/4")
