@@ -248,6 +248,158 @@ _MEASURES_PER_SYS = 4
 _HEADER_H = 170
 _CHORD_BAND_H = 64       # 各システム上部のコード帯の高さ
 
+# GP風リズム帯(#127): TAB最下線の下に符尾/連桁/付点を描く(Guitar Pro慣行)
+_RHY_GAP = 10            # 最下線→符尾開始の距離
+_STEM_LEN = 30           # 4分以下の符尾長
+_STEM_LEN_HALF = 15      # 2分音符の短い符尾長
+_EPS = 1e-6
+
+
+def _note_x(mi: int, beat_in: float, meas_w: float) -> float:
+    """小節内拍位置→X座標。数字・符尾・休符・楕円の全描画で共有する。"""
+    return _MARGIN + mi * meas_w + 26 + (beat_in / _BEATS_PER_MEASURE) * (meas_w - 44)
+
+
+def _is_dotted(dur: float) -> bool:
+    return any(abs(dur - d) < _EPS for d in (0.75, 1.5, 3.0))
+
+
+def _rhythm_marks(by_measure: dict[int, list["TabNote"]], m0: int, top: float,
+                  meas_w: float, n_measures: int) -> list[str]:
+    """システム分のリズム帯(符尾・連桁・付点)を描く(#127)。
+
+    オンセットグループごとに1本の符尾。全音符=符尾なし / 2分=短い符尾 /
+    4分以下=通常符尾。8分以下は同一拍内の隣接オンセットを連桁で結ぶ。
+    付点(0.75/1.5/3.0拍)は符尾脇に点を打つ。
+    """
+    parts: list[str] = []
+    y0 = top + _SYS_H + _RHY_GAP
+    for mi in range(_MEASURES_PER_SYS):
+        m = m0 + mi
+        if m >= n_measures:
+            continue
+        onsets: dict[float, float] = {}
+        for t in by_measure.get(m, ()):
+            b = round(t.start_beats - m * _BEATS_PER_MEASURE, 6)
+            onsets[b] = max(onsets.get(b, 0.0), t.dur_beats)
+        items = sorted(onsets.items())
+        for b, dur in items:
+            x = _note_x(mi, b, meas_w)
+            if dur < 4.0 - _EPS:  # 全音符は符尾なし(GP慣行)
+                ln = _STEM_LEN_HALF if dur >= 2.0 - _EPS else _STEM_LEN
+                parts.append(
+                    f'<line class="stem" x1="{x:.1f}" y1="{y0}" x2="{x:.1f}" '
+                    f'y2="{y0 + ln}" stroke="#222" stroke-width="2.4"/>')
+            if _is_dotted(dur):
+                ln = _STEM_LEN_HALF if dur >= 2.0 - _EPS else _STEM_LEN
+                parts.append(
+                    f'<circle class="dot" cx="{x + 8:.1f}" cy="{y0 + ln - 3}" '
+                    f'r="2.8" fill="#222"/>')
+        # 連桁: 8分以下が隙間なく続き同一拍に収まるペアを結ぶ(連続すれば視覚上1本に繋がる)
+        for (b1, d1), (b2, d2) in zip(items, items[1:]):
+            if d1 > 0.5 + _EPS or d2 > 0.5 + _EPS:
+                continue
+            if abs((b1 + d1) - b2) > _EPS or int(b1 + _EPS) != int(b2 + _EPS):
+                continue  # 隙間あり、または拍をまたぐペアは結ばない
+            x1, x2 = _note_x(mi, b1, meas_w), _note_x(mi, b2, meas_w)
+            yb = y0 + _STEM_LEN
+            parts.append(
+                f'<line class="beam" x1="{x1:.1f}" y1="{yb}" x2="{x2:.1f}" y2="{yb}" '
+                f'stroke="#222" stroke-width="5"/>')
+            if d1 <= 0.25 + _EPS and d2 <= 0.25 + _EPS:  # 16分は2本目
+                parts.append(
+                    f'<line class="beam2" x1="{x1:.1f}" y1="{yb - 7}" x2="{x2:.1f}" '
+                    f'y2="{yb - 7}" stroke="#222" stroke-width="5"/>')
+    return parts
+
+
+def _rest_svg(kind: float, x: float, top: float) -> str:
+    """休符1個のSVG(全て自前プリミティブ・SMuFLフォント非依存)。"""
+    ya = top + _LINE_GAP  # 第2線
+    if kind >= 4.0 - _EPS:   # 全休符: 第2線からぶら下がる矩形
+        return (f'<rect class="rest" x="{x - 11:.1f}" y="{ya}" width="22" height="8" '
+                f'fill="#222"/>')
+    if kind >= 2.0 - _EPS:   # 2分休符: 第3線の上に載る矩形
+        return (f'<rect class="rest" x="{x - 11:.1f}" y="{top + 2 * _LINE_GAP - 8}" '
+                f'width="22" height="8" fill="#222"/>')
+    if kind >= 1.0 - _EPS:   # 4分休符: 簡略ジグザグ
+        return (f'<path class="rest" d="M{x - 4:.1f},{ya} l8,10 -8,10 8,10" '
+                f'stroke="#222" stroke-width="3.2" fill="none"/>')
+    # 8分休符: 玉つき斜線
+    ym = top + 1.6 * _LINE_GAP
+    return (f'<path class="rest" d="M{x + 4:.1f},{ym} l-8,18 M{x + 4:.1f},{ym} '
+            f'a4,4 0 1 1 -7.5,2.5" stroke="#222" stroke-width="2.6" fill="none"/>')
+
+
+def _rest_marks(by_measure: dict[int, list["TabNote"]], m0: int, top: float,
+                meas_w: float, n_measures: int) -> list[str]:
+    """音のない区間を休符記号で埋める(#127)。空小節は全休符。
+
+    小節内の占有区間(音の開始〜終了)を合成し、隙間を0.25拍格子に丸めて
+    全→2分→4分→8分の貪欲分解で休符化する。
+    """
+    parts: list[str] = []
+    for mi in range(_MEASURES_PER_SYS):
+        m = m0 + mi
+        if m >= n_measures:
+            continue
+        m_start = m * _BEATS_PER_MEASURE
+        spans = []
+        for t in by_measure.get(m, ()):
+            s = max(0.0, t.start_beats - m_start)
+            e = min(float(_BEATS_PER_MEASURE), t.start_beats - m_start + t.dur_beats)
+            if e > s:
+                spans.append((s, e))
+        spans.sort()
+        merged: list[list[float]] = []
+        for s, e in spans:
+            if merged and s <= merged[-1][1] + _EPS:
+                merged[-1][1] = max(merged[-1][1], e)
+            else:
+                merged.append([s, e])
+        gaps = []
+        cur = 0.0
+        for s, e in merged:
+            if s - cur > 0.25:
+                gaps.append((cur, s))
+            cur = max(cur, e)
+        if _BEATS_PER_MEASURE - cur > 0.25:
+            gaps.append((cur, float(_BEATS_PER_MEASURE)))
+        for gs, ge in gaps:
+            b = round(gs * 4) / 4  # 0.25拍格子へ
+            rem = round((ge - b) * 4) / 4
+            while rem >= 0.5 - _EPS:
+                for size in (4.0, 2.0, 1.0, 0.5):
+                    if rem >= size - _EPS:
+                        parts.append(_rest_svg(size, _note_x(mi, b, meas_w), top))
+                        b += size
+                        rem -= size
+                        break
+    return parts
+
+
+def _chord_ellipses(by_measure: dict[int, list["TabNote"]], m0: int, top: float,
+                    meas_w: float) -> list[str]:
+    """同一オンセットに2音以上ある和音を楕円で囲む(#127・参考動画準拠)。"""
+    parts: list[str] = []
+    for mi in range(_MEASURES_PER_SYS):
+        groups: dict[float, list[TabNote]] = {}
+        for t in by_measure.get(m0 + mi, ()):
+            groups.setdefault(round(t.start_beats, 6), []).append(t)
+        for start, g in groups.items():
+            if len(g) < 2:
+                continue
+            beat_in = start - (m0 + mi) * _BEATS_PER_MEASURE
+            x = _note_x(mi, beat_in, meas_w)
+            ys = [top + (5 - t.string_index) * _LINE_GAP for t in g]
+            cy = (min(ys) + max(ys)) / 2
+            ry = (max(ys) - min(ys)) / 2 + 15
+            rx = 15 + 4 * max(len(str(t.fret)) for t in g)
+            parts.append(
+                f'<ellipse class="chord-ellipse" cx="{x:.1f}" cy="{cy:.1f}" '
+                f'rx="{rx}" ry="{ry:.1f}" stroke="#666" stroke-width="1.4" fill="none"/>')
+    return parts
+
 
 def _draw_chord_band(chord_spans: list, m0: int, top: float, meas_w: float,
                      chord_diagrams: bool) -> list[str]:
@@ -328,11 +480,18 @@ def _render_pages(tabs: list[TabNote], bpm: float, title: str | None,
                 parts.append(f'<line x1="{_MARGIN}" y1="{ly}" x2="{_MARGIN+width}" y2="{ly}" stroke="#333" stroke-width="1.6"/>')
             for ch, frac in zip("TAB", (0.16, 0.5, 0.84)):
                 parts.append(f'<text x="{_MARGIN-34}" y="{top+_SYS_H*frac+8}" font-size="26" fill="#333">{ch}</text>')
-            # 小節線と小節番号
+            # 小節線と小節番号(#127: GP風に全小節へ番号を振る)
             for mi in range(_MEASURES_PER_SYS + 1):
                 mx = _MARGIN + mi * meas_w
                 parts.append(f'<line x1="{mx}" y1="{top}" x2="{mx}" y2="{top+_SYS_H}" stroke="#333" stroke-width="1.6"/>')
-            parts.append(f'<text x="{_MARGIN}" y="{top-14}" font-size="18" fill="#999">{m0+1}</text>')
+            for mi in range(_MEASURES_PER_SYS):
+                if m0 + mi >= n_measures:
+                    break
+                mx = _MARGIN + mi * meas_w
+                parts.append(f'<text class="mnum" x="{mx+5}" y="{top-8}" font-size="17" fill="#555">{m0+mi+1}</text>')
+            # リズム帯(符尾/連桁/付点)・休符(#127)
+            parts.extend(_rhythm_marks(by_measure, m0, top, meas_w, n_measures))
+            parts.extend(_rest_marks(by_measure, m0, top, meas_w, n_measures))
             # フレット数字: 白背景(TAB線マスク)を全部先に描き、数字は後で全部描く。
             # こうしないと、密な箇所で後の数字の白背景が前の数字を消してしまう。
             rects: list[str] = []
@@ -340,16 +499,18 @@ def _render_pages(tabs: list[TabNote], bpm: float, title: str | None,
             for mi in range(_MEASURES_PER_SYS):
                 for t in by_measure.get(m0 + mi, ()):
                     beat_in = t.start_beats - (m0 + mi) * _BEATS_PER_MEASURE
-                    nx = _MARGIN + mi * meas_w + 26 + (beat_in / _BEATS_PER_MEASURE) * (meas_w - 44)
+                    nx = _note_x(mi, beat_in, meas_w)
                     ny = top + (5 - t.string_index) * _LINE_GAP
                     label = str(t.fret)
                     bw = 18 + 11 * len(label)
                     rects.append(f'<rect x="{nx-bw/2}" y="{ny-13}" width="{bw}" height="26" fill="white"/>')
-                    texts.append(f'<text x="{nx}" y="{ny+8}" font-size="24" text-anchor="middle">{label}</text>')
+                    texts.append(f'<text x="{nx}" y="{ny+8}" font-size="24" font-weight="bold" text-anchor="middle">{label}</text>')
                     if t.octave_shift:
                         texts.append(f'<text x="{nx}" y="{ny-16}" font-size="17" text-anchor="middle" fill="#b05050">*</text>')
             parts.extend(rects)
             parts.extend(texts)
+            # 和音の楕円囲み(#127): 数字の上に細線で重ねる
+            parts.extend(_chord_ellipses(by_measure, m0, top, meas_w))
             y += _SYS_H + _SYS_GAP
             drawn += 1
             sys_idx += 1
@@ -371,8 +532,7 @@ def _digit_x(t: TabNote, meas_w: float) -> tuple[int, int, float]:
     system = measure // _MEASURES_PER_SYS
     mi = measure % _MEASURES_PER_SYS
     beat_in = t.start_beats - measure * _BEATS_PER_MEASURE
-    nx = _MARGIN + mi * meas_w + 26 + (beat_in / _BEATS_PER_MEASURE) * (meas_w - 44)
-    return system, t.string_index, nx
+    return system, t.string_index, _note_x(mi, beat_in, meas_w)
 
 
 def count_overlaps(tabs: list[TabNote]) -> int:

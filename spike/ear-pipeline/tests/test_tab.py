@@ -292,3 +292,79 @@ class TestMonophonicKeepsChords:
             tabs, 120, "T", 0, 0, chord_spans, chord_diagrams=False))
         for name in ("C", "F", "G"):
             assert f">{name}<" in svg, f"コード名 {name} がSVGに描画されていない"
+
+
+class TestVisualElementsGpStyle:
+    """#127 GP風見た目: リズム表記・休符・小節番号・和音囲み・太字数字。
+
+    SVG要素は class 属性(stem/beam/dot/rest/chord-ellipse/mnum)で識別する
+    (既存 test_render_gate_chord_names_in_svg と同じ「出力SVGを直接照合」パターン)。
+    """
+
+    def _render(self, notes: list[QuantizedNote], monophonic: bool = False) -> str:
+        from earpipe.services.notate.tab import _render_pages
+
+        tab_notes = _reduce_to_melody(notes) if monophonic else notes
+        tabs = assign_frets(tab_notes)
+        return " ".join(_render_pages(tabs, 120, "T", 0, 0, [], chord_diagrams=False))
+
+    def test_quarter_notes_have_stems(self):
+        # Arrange: 4分音符×4(1小節)
+        svg = self._render([qn(b, 1.0, 60) for b in range(4)])
+        # Assert: 符尾4本・連桁なし
+        assert svg.count('class="stem"') == 4
+        assert svg.count('class="beam"') == 0
+
+    def test_eighth_pairs_are_beamed(self):
+        # Arrange: 8分音符×8(1小節)。同一拍内のペアが連桁で結ばれる
+        svg = self._render([qn(i * 0.5, 0.5, 60) for i in range(8)])
+        # Assert: 符尾8本・連桁4本(拍ごと)
+        assert svg.count('class="stem"') == 8
+        assert svg.count('class="beam"') == 4
+
+    def test_dotted_note_has_dot(self):
+        # Arrange: 付点4分(1.5拍)＋8分
+        svg = self._render([qn(0.0, 1.5, 60), qn(1.5, 0.5, 62)])
+        # Assert: 付点が1つ描かれる
+        assert svg.count('class="dot"') == 1
+
+    def test_whole_note_has_no_stem(self):
+        # Arrange: 全音符1つ → GP慣行で符尾なし
+        svg = self._render([qn(0.0, 4.0, 60)])
+        assert svg.count('class="stem"') == 0
+
+    def test_rests_drawn_for_gaps(self):
+        # Arrange: 1拍目と3拍目のみ音(2・4拍目は無音) → 4分休符2つ
+        svg = self._render([qn(0.0, 1.0, 60), qn(2.0, 1.0, 62)])
+        assert svg.count('class="rest"') >= 2
+
+    def test_empty_measure_gets_whole_rest(self):
+        # Arrange: 1小節目と3小節目に音・2小節目は完全に無音
+        svg = self._render([qn(0.0, 4.0, 60), qn(8.0, 4.0, 62)])
+        # Assert: 空の2小節目に全休符が置かれる(休符要素が最低1つ)
+        assert svg.count('class="rest"') >= 1
+
+    def test_measure_numbers_on_all_measures(self):
+        # Arrange: 8小節ぶんの音列(2システム)
+        svg = self._render([qn(m * 4.0, 4.0, 60) for m in range(8)])
+        # Assert: 全8小節に番号が振られる
+        assert svg.count('class="mnum"') == 8
+        for n in range(1, 9):
+            assert f'>{n}<' in svg, f"小節番号 {n} がない"
+
+    def test_chord_ellipse_for_stacked_frets(self):
+        # Arrange: 3音同時の和音(非mono) → 楕円囲みあり
+        chord = [qn(0.0, 4.0, m) for m in (60, 64, 67)]
+        svg = self._render(chord, monophonic=False)
+        assert svg.count('class="chord-ellipse"') >= 1
+
+    def test_no_chord_ellipse_when_monophonic(self):
+        # Arrange: 同じ和音でも monophonic なら単音化され楕円なし
+        chord = [qn(0.0, 4.0, m) for m in (60, 64, 67)]
+        svg = self._render(chord, monophonic=True)
+        assert svg.count('class="chord-ellipse"') == 0
+
+    def test_fret_digits_are_bold(self):
+        # Arrange: フレット数字は太字(参考動画準拠)
+        svg = self._render([qn(0.0, 1.0, 60)])
+        assert 'font-weight="bold"' in svg
