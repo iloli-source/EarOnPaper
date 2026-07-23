@@ -227,6 +227,37 @@ async function triggerFileOpen() {
   }
 }
 
+// ===== URL取り込み(#128) =====
+
+const btnUrl = document.getElementById('btn-url')
+const urlInput = document.getElementById('url-input')
+
+async function triggerUrlImport() {
+  const url = (urlInput.value || '').trim()
+  if (!url) return
+  // ダウンロード中も既存のPROCESSING画面で進捗を見せ、完了後にファイルフローへ合流する
+  document.getElementById('processing-file').textContent = url
+  currentStage = -1
+  setStage(0)
+  setPhaseLabel('動画から音声を取り込み中…')
+  showState('processing')
+  const starfield = document.getElementById('starfield')
+  if (starfield) spawnStars(starfield)
+  attachProgress()
+  try {
+    const imported = await window.earpipe.importUrl(url)
+    urlInput.value = ''
+    startFlow(imported.path, imported.title)
+  } catch (err) {
+    showError(err.message)
+  }
+}
+
+btnUrl.addEventListener('click', triggerUrlImport)
+urlInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') triggerUrlImport()
+})
+
 // ===== フロー: 分離 → 楽器選択 → 選択楽器のみ採譜 =====
 
 async function startFlow(filePath, fileName) {

@@ -227,6 +227,44 @@ html, body {
   color: var(--text);
 }
 
+/* #128: URL取り込み行(ドロップゾーン下) */
+.url-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  width: min(520px, 90%);
+  -webkit-app-region: no-drag;
+}
+
+.url-input {
+  flex: 1;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color var(--duration-fast);
+}
+
+.url-input:focus {
+  border-color: var(--accent);
+}
+
+.url-input::placeholder {
+  color: var(--text-muted);
+}
+
+.url-note {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: oklch(45% 0.01 250);
+  text-align: center;
+  max-width: 520px;
+}
+
 /* === PROCESSING: 処理中 === */
 #state-processing {
   flex-direction: column;

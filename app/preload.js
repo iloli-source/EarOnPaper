@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('earpipe', {
   separateAudio: (filePath) => ipcRenderer.invoke('separate-audio', filePath),
   transcribeStem: (filePath, stemId, title, opts) => ipcRenderer.invoke('transcribe-stem', filePath, stemId, title, opts),
   openFileDialog: () => ipcRenderer.invoke('open-file-dialog'),
+  // #128: URL取り込み(yt-dlpローカル実行)。成功で { path, title } を返す
+  importUrl: (url) => ipcRenderer.invoke('import-url', url),
   saveFile: (src, ext, name) => ipcRenderer.invoke('save-file', src, ext, name),
   // 詳細エクスポート(簡譜/度数/GP5等)。savePath は E2E 時のみ使用。
   exportExtra: (inputPath, key, e2eSavePath) =>

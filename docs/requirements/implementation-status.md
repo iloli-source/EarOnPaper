@@ -35,6 +35,7 @@
 | ID | 名称 | Phase | 状況 | 根拠 / 備考 |
 |---|---|---|---|---|
 | F-001 | 音声ファイル入力 | 1 | ✅ | `stem/preprocess.py:load_audio()` wav/mp3/flac/ogg/m4a |
+| F-006 | 動画サイトURL直接入力 | 2 | ✅ | app `import-url`(yt-dlpローカル実行・#128)。裁定変更2026-07-23 |
 | F-003 | **ステム分離** | 1 | ✅ | `stem/separate.py` Demucs 4-stem(別venv・#65)。`--stem`/`separate-transcribe`で楽器毎に譜面化 |
 | F-010 | 多重音高検出 | 1 | ✅ | `ear/mono.py` pYIN / `ear/poly.py` basic-pitch / `adaptive.py` / `engine_select.py` mono/poly自動選択(#64) |
 | F-011 | オンセット/オフセット | 1 | ✅ | PitchEvent契約でonset/offset秒 |

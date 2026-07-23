@@ -46,6 +46,13 @@ test('採譜→PDF表示→エクスポートUIが揃う(受入1・2・3)', asyn
     // 起動直後は IDLE(ドロップ待ち)
     await expect(win.locator('#state-idle')).toHaveClass(/active/)
 
+    // #128: URL取り込みUI(入力欄・ボタン・注意文言)が表示される
+    // (実DLはネットワーク依存でflakyなため表示と importUrl API の公開のみ固定)
+    await expect(win.locator('#url-input')).toBeVisible()
+    await expect(win.locator('#btn-url')).toBeVisible()
+    await expect(win.locator('.url-note')).toContainText('私的利用')
+    expect(api).toEqual(expect.arrayContaining(['importUrl']))
+
     // ドロップと同じ入口で採譜を起動
     await triggerTranscribe(win, wavPath)
 

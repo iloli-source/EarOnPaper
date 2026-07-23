@@ -306,6 +306,53 @@ function bpEnv() {
   return env
 }
 
+// ── URL取り込み(#128・F-006裁定変更 2026-07-23) ─────────────────────
+// yt-dlp(ユーザーマシン上でのローカル実行)でURLの音声をm4a化し、既存の
+// ファイル入力フローに合流させる。サーバーは一切関与しない(NF-023非衝突)。
+// サイト利用規約・楽曲の著作権はユーザー責任(レンダラ側に注意文言を常設)。
+ipcMain.handle('import-url', async (event, url) => {
+  if (!pu.isAllowedMediaUrl(url)) {
+    throw new Error('URLの形式が正しくありません(https:// で始まる動画ページのURLを貼ってください)')
+  }
+  const ytdlp = pu.resolveExecutable(pu.ytDlpCandidates())
+  const dlDir = fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-dl-'))
+  generatedRoots.add(dlDir)
+  const args = pu.buildYtDlpArgs(url, dlDir)
+  return await new Promise((resolve, reject) => {
+    const proc = spawn(ytdlp, args, { env: { ...process.env } })
+    activeProcesses.add(proc)
+    let stdout = ''
+    let stderr = ''
+    proc.stdout.on('data', (c) => { stdout += c.toString() })
+    proc.stderr.on('data', (c) => {
+      const line = c.toString().trim()
+      if (line) { stderr += line + '\n'; event.sender.send('transcribe-progress', line) }
+    })
+    proc.on('error', (e) => {
+      activeProcesses.delete(proc)
+      reject(new Error(e.code === 'ENOENT'
+        ? 'yt-dlp が見つかりません。ターミナルで brew install yt-dlp を実行してから再試行してください'
+        : `yt-dlp の起動に失敗しました: ${e.message}`))
+    })
+    proc.on('close', (code) => {
+      activeProcesses.delete(proc)
+      if (code !== 0) {
+        reject(new Error('URLの取り込みに失敗しました。動画が非公開/削除済みか、'
+          + `yt-dlpが古い可能性があります(brew upgrade yt-dlp)\n${stderr.slice(-500)}`))
+        return
+      }
+      // --print after_move:filepath により確定した保存先がstdout末尾行に出る
+      const lines = stdout.trim().split('\n').filter(Boolean)
+      const filePath = lines[lines.length - 1]
+      if (!filePath || !fs.existsSync(filePath)) {
+        reject(new Error('取り込んだ音声ファイルが見つかりませんでした'))
+        return
+      }
+      resolve({ path: filePath, title: path.basename(filePath, path.extname(filePath)) })
+    })
+  })
+})
+
 // 分離のみ実行 → 抽出できた楽器一覧を返す(採譜はしない)
 ipcMain.handle('separate-audio', async (event, inputPath) => {
   if (!pu.isAllowedAudioInput(inputPath)) {

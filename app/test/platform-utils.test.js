@@ -78,3 +78,34 @@ test('clampTitle: 200文字上限', () => {
   assert.strictEqual(pu.clampTitle('short'), 'short')
   assert.strictEqual(pu.clampTitle(null), '')
 })
+
+// ==== #128 URL取り込み(yt-dlp) ====
+
+test('isAllowedMediaUrl: https/httpのみ許可し危険スキームを拒否', () => {
+  assert.strictEqual(pu.isAllowedMediaUrl('https://www.youtube.com/watch?v=abc'), true)
+  assert.strictEqual(pu.isAllowedMediaUrl('http://example.com/v'), true)
+  assert.strictEqual(pu.isAllowedMediaUrl('file:///etc/passwd'), false)
+  assert.strictEqual(pu.isAllowedMediaUrl('javascript:alert(1)'), false)
+  assert.strictEqual(pu.isAllowedMediaUrl('ftp://example.com/a'), false)
+  assert.strictEqual(pu.isAllowedMediaUrl('https://'), false)
+  assert.strictEqual(pu.isAllowedMediaUrl('not a url'), false)
+  assert.strictEqual(pu.isAllowedMediaUrl(''), false)
+  assert.strictEqual(pu.isAllowedMediaUrl(null), false)
+})
+
+test('buildYtDlpArgs: --no-playlist固定・音声抽出・URLは末尾', () => {
+  const args = pu.buildYtDlpArgs('https://youtu.be/x', '/tmp/dl')
+  assert.ok(args.includes('--no-playlist'), 'プレイリスト展開は常に禁止')
+  assert.ok(args.includes('-x'), '音声抽出')
+  assert.ok(args.includes('m4a'), 'm4aへ変換(エンジン対応形式)')
+  assert.ok(args.some((a) => a.startsWith('/tmp/dl/')), '出力先が指定dir配下')
+  assert.strictEqual(args[args.length - 1], 'https://youtu.be/x', 'URLが最終引数')
+})
+
+test('ytDlpCandidates: 環境変数が最優先・Homebrewパス・PATHフォールバック', () => {
+  const withEnv = pu.ytDlpCandidates({ EARPIPE_YTDLP: '/custom/yt-dlp' })
+  assert.strictEqual(withEnv[0], '/custom/yt-dlp')
+  const noEnv = pu.ytDlpCandidates({})
+  assert.ok(noEnv.includes('/opt/homebrew/bin/yt-dlp'), 'Homebrew(Apple Silicon)候補')
+  assert.strictEqual(noEnv[noEnv.length - 1], 'yt-dlp', 'PATH解決のコマンド名で終わる')
+})

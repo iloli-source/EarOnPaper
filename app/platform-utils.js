@@ -96,6 +96,45 @@ function clampTitle(title, max = MAX_TITLE_LEN) {
   return String(title == null ? '' : title).slice(0, max)
 }
 
+// ==== #128 URL取り込み(yt-dlp・完全ローカル実行) ====
+
+// #128: 取り込み対象URLの検証。http(s)かつホスト名ありのみ許可
+// (file:/javascript:等の危険スキームとローカルパス偽装をIPC境界で拒否する)
+function isAllowedMediaUrl(url) {
+  if (typeof url !== 'string' || url === '') return false
+  let parsed
+  try {
+    parsed = new URL(url)
+  } catch {
+    return false
+  }
+  return (parsed.protocol === 'https:' || parsed.protocol === 'http:') && parsed.hostname !== ''
+}
+
+// #128: yt-dlp引数の組み立て(純関数・シェル非経由のspawn配列用)。
+// --no-playlist は常に固定(プレイリスト一括DLを構造的に不可能にする)。
+// 音声はエンジン対応形式のm4aへ抽出し、確定した保存先パスをstdoutに印字させる。
+function buildYtDlpArgs(url, outDir) {
+  return [
+    '--no-playlist',
+    '-f', 'bestaudio/best',
+    '-x', '--audio-format', 'm4a',
+    '-o', `${outDir}/%(title)s.%(ext)s`,
+    '--no-simulate',
+    '--print', 'after_move:filepath',
+    url,
+  ]
+}
+
+// #128: yt-dlp実行ファイル候補。環境変数→Homebrew(AppleSilicon/Intel)→PATHの順
+// (pythonCandidates/resolveExecutable と同パターン)。
+function ytDlpCandidates(env = process.env) {
+  const cands = []
+  if (env && env.EARPIPE_YTDLP) cands.push(env.EARPIPE_YTDLP)
+  cands.push('/opt/homebrew/bin/yt-dlp', '/usr/local/bin/yt-dlp', 'yt-dlp')
+  return cands
+}
+
 module.exports = {
   AUDIO_EXTENSIONS,
   OUTPUT_EXTENSIONS,
@@ -109,4 +148,7 @@ module.exports = {
   basicPitchPythonCandidates,
   resolveExistingPath,
   clampTitle,
+  isAllowedMediaUrl,
+  buildYtDlpArgs,
+  ytDlpCandidates,
 }
