@@ -3,6 +3,8 @@
 const { test } = require('node:test')
 const assert = require('node:assert')
 const path = require('path')
+const fs = require('fs')
+const os = require('os')
 const pu = require('../platform-utils')
 
 // 3.3 js_basename_cross_platform
@@ -37,6 +39,22 @@ test('isManagedOutput: 区切り境界を理解した包含判定(prefix偽装�
   assert.strictEqual(pu.isManagedOutput(root, root), false)
   // 親方向(..)は拒否
   assert.strictEqual(pu.isManagedOutput(root, path.join(root, '..', 'out.pdf')), false)
+})
+
+test('isManagedOutput: symlinkでroot外を指す成果物を拒否', (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windowsのsymlink権限差を避ける')
+    return
+  }
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-path-test-'))
+  const root = path.join(base, 'managed')
+  const outside = path.join(base, 'outside.pdf')
+  fs.mkdirSync(root)
+  fs.writeFileSync(outside, 'outside')
+  const link = path.join(root, 'linked.pdf')
+  fs.symlinkSync(outside, link)
+  assert.strictEqual(pu.isManagedOutput(root, link), false)
+  fs.rmSync(base, { recursive: true, force: true })
 })
 
 // 3.16 js_audio_extension_allowlist
@@ -79,11 +97,41 @@ test('clampTitle: 200文字上限', () => {
   assert.strictEqual(pu.clampTitle(null), '')
 })
 
+test('normalizeBpmRange: 有限・昇順・20〜400のみ許可', () => {
+  assert.strictEqual(pu.normalizeBpmRange('30-60'), '30-60')
+  assert.strictEqual(pu.normalizeBpmRange('60-60'), null)
+  assert.strictEqual(pu.normalizeBpmRange('90-30'), null)
+  assert.strictEqual(pu.normalizeBpmRange('0-120'), null)
+  assert.strictEqual(pu.normalizeBpmRange('120-999'), null)
+  assert.strictEqual(pu.normalizeBpmRange('1e2-200'), null)
+  assert.strictEqual(pu.normalizeBpmRange('Infinity-200'), null)
+})
+
+test('boundedPositiveInt: 不正・過大な環境値を既定値へ戻す', () => {
+  assert.strictEqual(pu.boundedPositiveInt('3', 2, 1, 8), 3)
+  assert.strictEqual(pu.boundedPositiveInt('Infinity', 2, 1, 8), 2)
+  assert.strictEqual(pu.boundedPositiveInt('-1', 2, 1, 8), 2)
+  assert.strictEqual(pu.boundedPositiveInt('1.5', 2, 1, 8), 2)
+  assert.strictEqual(pu.boundedPositiveInt('99', 2, 1, 8), 2)
+})
+
+test('normalizeEngine: allowlist外はautoへ戻す', () => {
+  assert.strictEqual(pu.normalizeEngine('mono'), 'mono')
+  assert.strictEqual(pu.normalizeEngine('poly'), 'poly')
+  assert.strictEqual(pu.normalizeEngine('auto'), 'auto')
+  assert.strictEqual(pu.normalizeEngine('shell;rm'), 'auto')
+  assert.strictEqual(pu.normalizeEngine(null), 'auto')
+})
+
 // ==== #128 URL取り込み(yt-dlp) ====
 
 test('isAllowedMediaUrl: https/httpのみ許可し危険スキームを拒否', () => {
   assert.strictEqual(pu.isAllowedMediaUrl('https://www.youtube.com/watch?v=abc'), true)
   assert.strictEqual(pu.isAllowedMediaUrl('http://example.com/v'), true)
+  assert.strictEqual(pu.isAllowedMediaUrl('http://127.0.0.1/private'), false)
+  assert.strictEqual(pu.isAllowedMediaUrl('http://localhost/private'), false)
+  assert.strictEqual(pu.isAllowedMediaUrl('http://192.168.1.1/private'), false)
+  assert.strictEqual(pu.isAllowedMediaUrl('http://[::1]/private'), false)
   assert.strictEqual(pu.isAllowedMediaUrl('file:///etc/passwd'), false)
   assert.strictEqual(pu.isAllowedMediaUrl('javascript:alert(1)'), false)
   assert.strictEqual(pu.isAllowedMediaUrl('ftp://example.com/a'), false)
@@ -96,6 +144,7 @@ test('isAllowedMediaUrl: https/httpのみ許可し危険スキームを拒否', 
 test('buildYtDlpArgs: --no-playlist固定・音声抽出・URLは末尾', () => {
   const args = pu.buildYtDlpArgs('https://youtu.be/x', '/tmp/dl')
   assert.ok(args.includes('--no-playlist'), 'プレイリスト展開は常に禁止')
+  assert.ok(args.includes('--max-filesize'), '単一巨大DLに上限を設ける')
   assert.ok(args.includes('-x'), '音声抽出')
   assert.ok(args.includes('m4a'), 'm4aへ変換(エンジン対応形式)')
   assert.ok(args.some((a) => a.startsWith('/tmp/dl/')), '出力先が指定dir配下')
@@ -108,4 +157,19 @@ test('ytDlpCandidates: 環境変数が最優先・Homebrewパス・PATHフォー
   const noEnv = pu.ytDlpCandidates({})
   assert.ok(noEnv.includes('/opt/homebrew/bin/yt-dlp'), 'Homebrew(Apple Silicon)候補')
   assert.strictEqual(noEnv[noEnv.length - 1], 'yt-dlp', 'PATH解決のコマンド名で終わる')
+})
+
+
+test('selectRootsForRelease: URL元音声は再分離時だけ保持する', () => {
+  const all = new Set(['/tmp/download-root', '/tmp/separation-root', '/tmp/output-root'])
+  const sources = new Set(['/tmp/download-root'])
+  assert.deepEqual(
+    pu.selectRootsForRelease(all, sources, true),
+    ['/tmp/separation-root', '/tmp/output-root'],
+  )
+  assert.deepEqual(
+    pu.selectRootsForRelease(all, sources, false),
+    ['/tmp/download-root', '/tmp/separation-root', '/tmp/output-root'],
+  )
+  assert.deepEqual(pu.selectRootsForRelease(undefined, undefined, true), [])
 })

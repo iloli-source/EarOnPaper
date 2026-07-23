@@ -5,6 +5,7 @@
 
 const path = require('path')
 const fs = require('fs')
+const net = require('net')
 const { pathToFileURL } = require('url')
 
 // 採譜入力として許可する音声拡張子(小文字・ドット付き)。UIフィルタではなくIPC境界の検証に使う(3.16)
@@ -31,7 +32,13 @@ function isManagedOutput(rootDir, filePath, allowedExts = OUTPUT_EXTENSIONS) {
   if (typeof rootDir !== 'string' || typeof filePath !== 'string' || rootDir === '') return false
   const ext = path.extname(filePath).toLowerCase()
   if (!allowedExts.includes(ext)) return false
-  const rel = path.relative(rootDir, filePath)
+  // 既存ファイルは実体パスを使う。字面上はroot配下でも、symlink経由で
+  // root外を指すファイルを「管理下」と誤認しないため。
+  let canonicalRoot = path.resolve(rootDir)
+  let canonicalFile = path.resolve(filePath)
+  try { canonicalRoot = fs.realpathSync.native(rootDir) } catch { /* 未作成rootはresolveで判定 */ }
+  try { canonicalFile = fs.realpathSync.native(filePath) } catch { /* 未作成fileはresolveで判定 */ }
+  const rel = path.relative(canonicalRoot, canonicalFile)
   if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return false
   return true
 }
@@ -96,6 +103,39 @@ function clampTitle(title, max = MAX_TITLE_LEN) {
   return String(title == null ? '' : title).slice(0, max)
 }
 
+// GUIから渡されるBPM範囲をCLIへ渡す前に正規化する。
+// 20〜400BPMに制限し、非有限値・逆転範囲・巨大整数を拒否する。
+function normalizeBpmRange(value, min = 20, max = 400) {
+  if (typeof value !== 'string' || !/^\d{1,3}-\d{1,3}$/.test(value)) return null
+  const [lo, hi] = value.split('-').map(Number)
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null
+  if (lo < min || hi > max || hi <= lo) return null
+  return `${lo}-${hi}`
+}
+
+
+// 環境変数由来の数値を安全な整数範囲へ閉じ込める。Infinity/NaN/負数や
+// 桁違いの設定値は採用せず、既定値へ戻す。
+function boundedPositiveInt(value, fallback, min = 1, max = Number.MAX_SAFE_INTEGER) {
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) return fallback
+  return parsed
+}
+
+
+// 入力に紐づく一時ルートのうち、今回削除すべきものを選ぶ。
+// URL取り込み元は再分離の直前だけ保持し、入力切替・終了では削除する。
+function selectRootsForRelease(roots, sourceRoots, preserveSource = false) {
+  const all = roots ? [...roots] : []
+  if (!preserveSource) return all
+  const sources = sourceRoots || new Set()
+  return all.filter((root) => !sources.has(root))
+}
+
+function normalizeEngine(value) {
+  return ['auto', 'mono', 'poly'].includes(value) ? value : 'auto'
+}
+
 // ==== #128 URL取り込み(yt-dlp・完全ローカル実行) ====
 
 // #128: 取り込み対象URLの検証。http(s)かつホスト名ありのみ許可
@@ -108,7 +148,34 @@ function isAllowedMediaUrl(url) {
   } catch {
     return false
   }
-  return (parsed.protocol === 'https:' || parsed.protocol === 'http:') && parsed.hostname !== ''
+  if ((parsed.protocol !== 'https:' && parsed.protocol !== 'http:') || parsed.hostname === '') return false
+  if (parsed.username || parsed.password) return false
+  // ローカル/プライベートネットワークへの到達は、動画取り込み機能の目的外。
+  // 悪意あるリンクによるlocalhost・ルータ管理画面等へのアクセスを明示的に拒否する。
+  const host = parsed.hostname.replace(/^\[|\]$/g, '').replace(/\.+$/, '').toLowerCase()
+  if (host === 'localhost' || host.endsWith('.localhost')
+      || host.endsWith('.local') || host === 'home.arpa' || host.endsWith('.home.arpa')) return false
+  const family = net.isIP(host)
+  if (family === 4) {
+    const octets = host.split('.').map(Number)
+    const [a, b] = octets
+    if (a === 0 || a === 10 || a === 127 || a >= 224) return false
+    if (a === 169 && b === 254) return false
+    if (a === 172 && b >= 16 && b <= 31) return false
+    if (a === 192 && b === 168) return false
+    if (a === 100 && b >= 64 && b <= 127) return false
+    // IANA special-purpose/documentation/benchmark ranges。外部メディア取得先として不要。
+    if (a === 192 && b === 0) return false
+    if (a === 198 && (b === 18 || b === 19 || b === 51)) return false
+    if (a === 203 && b === 0) return false
+  } else if (family === 6) {
+    if (host === '::1' || host === '::') return false
+    if (/^(fc|fd)/.test(host) || /^fe[89ab]/.test(host) || /^ff/.test(host)) return false
+    // IPv4-mapped/compatible IPv6は表記揺れが多く、ローカルIPv4を隠せるため直指定を拒否。
+    if (host.startsWith('::ffff:') || /^::[0-9a-f]/.test(host)) return false
+    if (host.startsWith('2001:db8:')) return false
+  }
+  return true
 }
 
 // #128: yt-dlp引数の組み立て(純関数・シェル非経由のspawn配列用)。
@@ -117,9 +184,10 @@ function isAllowedMediaUrl(url) {
 function buildYtDlpArgs(url, outDir) {
   return [
     '--no-playlist',
+    '--max-filesize', '4G',
     '-f', 'bestaudio/best',
     '-x', '--audio-format', 'm4a',
-    '-o', `${outDir}/%(title)s.%(ext)s`,
+    '-o', path.join(outDir, '%(title)s.%(ext)s'),
     '--no-simulate',
     '--print', 'after_move:filepath',
     url,
@@ -148,6 +216,10 @@ module.exports = {
   basicPitchPythonCandidates,
   resolveExistingPath,
   clampTitle,
+  normalizeBpmRange,
+  boundedPositiveInt,
+  normalizeEngine,
+  selectRootsForRelease,
   isAllowedMediaUrl,
   buildYtDlpArgs,
   ytDlpCandidates,

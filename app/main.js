@@ -13,6 +13,25 @@ const PYTHON = pu.resolveExecutable(pu.pythonCandidates(ENGINE_DIR))
 // 3.17/3.18: 生成した一時ディレクトリと採譜子プロセスを追跡し、終了時に片付ける
 const generatedRoots = new Set()
 const activeProcesses = new Set()
+const processInputs = new Map()
+const processTokens = new Map()
+const rootsByInput = new Map()
+// URL取り込み元の音声を、分離・採譜の派生成果物と区別して保持する。
+// 同じ入力の再分離時は元音声だけ残し、入力切替・終了時にはすべて削除する。
+const sourceRootsByInput = new Map()
+
+const MAX_CAPTURE_BYTES = 8 * 1024 * 1024
+const MAX_DOWNLOADED_BYTES = 4 * 1024 * 1024 * 1024
+const MAX_STDERR_CHARS = 64 * 1024
+const ENGINE_TIMEOUT_MS = pu.boundedPositiveInt(
+  process.env.EARPIPE_ENGINE_TIMEOUT_MS, 6 * 60 * 60 * 1000, 1000, 24 * 60 * 60 * 1000,
+)
+const DOWNLOAD_TIMEOUT_MS = pu.boundedPositiveInt(
+  process.env.EARPIPE_DOWNLOAD_TIMEOUT_MS, 45 * 60 * 1000, 1000, 6 * 60 * 60 * 1000,
+)
+const MAX_ACTIVE_PROCESSES = pu.boundedPositiveInt(
+  process.env.EARPIPE_MAX_ACTIVE_PROCESSES, 2, 1, 8,
+)
 
 // 分離済みステムwavのキャッシュ: inputPath -> { dir, stems: {name: wavPath} }。
 // 分離(Demucs)は重いので1入力につき1回だけ実行し、選ばれた楽器だけ後段で採譜する。
@@ -59,6 +78,19 @@ function createWindow() {
   // renderer 側のテストフック(window.__earpipeTest)は本番では一切生えない。
   const loadOpts = process.env.EARPAPER_E2E === '1' ? { query: { e2e: '1' } } : undefined
   mainWindow.loadFile(path.join(__dirname, 'renderer/index.html'), loadOpts)
+
+  // ローカル固定UIから外部ページへ遷移・新規ウィンドウ生成させない。
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith('file:')) event.preventDefault()
+  })
+
+  // macOSはウィンドウを閉じてもプロセスが残るため、閉じた時点で一時成果物と
+  // 長時間子プロセスを必ず解放する。
+  mainWindow.on('closed', () => {
+    cleanupAllResources()
+    mainWindow = null
+  })
 }
 
 app.whenReady().then(createWindow)
@@ -72,16 +104,238 @@ app.on('activate', () => {
 })
 
 // 3.17/3.18: 終了時に残留プロセスをkillし、一時ディレクトリを再帰削除
-app.on('before-quit', () => {
+
+function killProcessTree(proc, signal = 'SIGKILL') {
+  if (!proc || !proc.pid) return
+  if (process.platform === 'win32') {
+    try {
+      const killer = spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { windowsHide: true })
+      killer.on('error', () => { try { proc.kill(signal) } catch { /* already gone */ } })
+    } catch {
+      try { proc.kill(signal) } catch { /* already gone */ }
+    }
+    return
+  }
+  try {
+    process.kill(-proc.pid, signal)
+  } catch {
+    try { proc.kill(signal) } catch { /* already gone */ }
+  }
+}
+
+function waitForProcessClose(proc, timeoutMs = 5000) {
+  if (!proc || proc.exitCode !== null) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    let done = false
+    const finish = (closed) => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      resolve(closed)
+    }
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    timer.unref?.()
+    proc.once('close', () => finish(true))
+  })
+}
+
+function cleanupAllResources() {
   for (const proc of activeProcesses) {
-    try { proc.kill() } catch { /* already gone */ }
+    killProcessTree(proc, 'SIGKILL')
   }
   activeProcesses.clear()
+  processInputs.clear()
+  processTokens.clear()
   for (const root of generatedRoots) {
     try { fs.rmSync(root, { recursive: true, force: true }) } catch { /* best effort */ }
   }
   generatedRoots.clear()
+  rootsByInput.clear()
+  sourceRootsByInput.clear()
+  separationCache.clear()
+  primaryMusicxmlByInput.clear()
+}
+
+app.on('before-quit', cleanupAllResources)
+
+function registerRoot(root, inputPath = null) {
+  generatedRoots.add(root)
+  if (inputPath) {
+    if (!rootsByInput.has(inputPath)) rootsByInput.set(inputPath, new Set())
+    rootsByInput.get(inputPath).add(root)
+  }
+  return root
+}
+
+function associateRoot(root, inputPath) {
+  if (!root || !inputPath) return
+  if (!rootsByInput.has(inputPath)) rootsByInput.set(inputPath, new Set())
+  rootsByInput.get(inputPath).add(root)
+}
+
+function associateSourceRoot(root, inputPath) {
+  associateRoot(root, inputPath)
+  if (!root || !inputPath) return
+  if (!sourceRootsByInput.has(inputPath)) sourceRootsByInput.set(inputPath, new Set())
+  sourceRootsByInput.get(inputPath).add(root)
+}
+
+function removeRoot(root) {
+  if (!root) return
+  try { fs.rmSync(root, { recursive: true, force: true }) } catch { /* best effort */ }
+  generatedRoots.delete(root)
+  for (const [input, roots] of rootsByInput) {
+    roots.delete(root)
+    if (roots.size === 0) rootsByInput.delete(input)
+  }
+  for (const [input, roots] of sourceRootsByInput) {
+    roots.delete(root)
+    if (roots.size === 0) sourceRootsByInput.delete(input)
+  }
+}
+
+async function releaseInputResources(inputPath, { preserveSource = false } = {}) {
+  if (!inputPath) return
+  const stopping = []
+  for (const proc of [...activeProcesses]) {
+    if (processInputs.get(proc) === inputPath) {
+      stopping.push(waitForProcessClose(proc))
+      killProcessTree(proc, 'SIGKILL')
+    }
+  }
+  if (stopping.length > 0) {
+    const closed = await Promise.all(stopping)
+    if (closed.some((ok) => !ok)) throw new Error('実行中プロセスを安全に停止できませんでした')
+  }
+  const roots = rootsByInput.get(inputPath)
+  const sourceRoots = sourceRootsByInput.get(inputPath)
+  for (const root of pu.selectRootsForRelease(roots, sourceRoots, preserveSource)) {
+    removeRoot(root)
+  }
+  if (!preserveSource) {
+    rootsByInput.delete(inputPath)
+    sourceRootsByInput.delete(inputPath)
+  }
+  separationCache.delete(inputPath)
+  primaryMusicxmlByInput.delete(inputPath)
+}
+
+ipcMain.handle('release-input', async (_, inputPath) => {
+  await releaseInputResources(inputPath)
 })
+
+ipcMain.handle('cancel-operation', async (_, token) => {
+  const safeToken = token == null ? null : String(token).slice(0, 100)
+  if (!safeToken) return
+  const stopping = []
+  for (const proc of [...activeProcesses]) {
+    if (processTokens.get(proc) === safeToken) {
+      stopping.push(waitForProcessClose(proc))
+      killProcessTree(proc, 'SIGKILL')
+    }
+  }
+  if (stopping.length > 0) {
+    const closed = await Promise.all(stopping)
+    if (closed.some((ok) => !ok)) throw new Error('URL取得プロセスを安全に停止できませんでした')
+  }
+})
+
+function safeProgress(sender, line, token = null) {
+  if (!line || !sender || sender.isDestroyed()) return
+  const safeToken = token == null ? null : String(token).slice(0, 100)
+  try { sender.send('transcribe-progress', { token: safeToken, line }) } catch { /* renderer closed */ }
+}
+
+function boundedTail(current, chunk, max = MAX_STDERR_CHARS) {
+  const next = current + chunk
+  return next.length > max ? next.slice(-max) : next
+}
+
+function runCapturedProcess(command, args, {
+  cwd,
+  env,
+  inputPath = null,
+  operationToken = null,
+  timeoutMs = ENGINE_TIMEOUT_MS,
+  onProgress = null,
+  parseJson = false,
+} = {}) {
+  if (activeProcesses.size >= MAX_ACTIVE_PROCESSES) {
+    return Promise.reject(new Error('別の重い処理が実行中です。完了後に再試行してください'))
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let stdoutBytes = 0
+    const stdoutParts = []
+    let stderr = ''
+    let proc
+    let timer = null
+
+    const finish = (fn, value) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (proc) {
+        activeProcesses.delete(proc)
+        processInputs.delete(proc)
+        processTokens.delete(proc)
+      }
+      fn(value)
+    }
+
+    try {
+      proc = spawn(command, args, {
+        cwd, env: env || { ...process.env }, windowsHide: true,
+        detached: process.platform !== 'win32',
+      })
+    } catch (err) {
+      reject(err)
+      return
+    }
+    activeProcesses.add(proc)
+    if (inputPath) processInputs.set(proc, inputPath)
+    if (operationToken != null) processTokens.set(proc, String(operationToken).slice(0, 100))
+
+    timer = setTimeout(() => {
+      killProcessTree(proc, 'SIGKILL')
+      finish(reject, new Error(`処理が制限時間を超えました (${Math.round(timeoutMs / 60000)}分)`))
+    }, timeoutMs)
+    timer.unref?.()
+
+    proc.stdout?.on('data', (chunk) => {
+      stdoutBytes += chunk.length
+      if (stdoutBytes > MAX_CAPTURE_BYTES) {
+        killProcessTree(proc, 'SIGKILL')
+        finish(reject, new Error('エンジン標準出力が上限を超えました'))
+        return
+      }
+      stdoutParts.push(Buffer.from(chunk))
+    })
+    proc.stderr?.on('data', (chunk) => {
+      const text = chunk.toString()
+      stderr = boundedTail(stderr, text)
+      if (onProgress) onProgress(text.trim())
+    })
+    proc.on('error', (err) => finish(reject, err))
+    proc.on('close', (code) => {
+      if (settled) return
+      if (code !== 0) {
+        finish(reject, new Error(`プロセスがエラーで終了しました (code ${code})\n${stderr}`))
+        return
+      }
+      const stdout = Buffer.concat(stdoutParts).toString()
+      if (!parseJson) {
+        finish(resolve, { stdout, stderr })
+        return
+      }
+      try {
+        finish(resolve, JSON.parse(stdout))
+      } catch {
+        finish(reject, new Error('エンジン出力のパースに失敗しました'))
+      }
+    })
+  })
+}
 
 // 管理下(アプリ生成物)の判定: いずれかの一時ルート配下かつ許可拡張子(3.14/3.15/3.20)
 function isOwnedOutput(filePath) {
@@ -123,9 +377,16 @@ ipcMain.handle('save-file', async (_, srcPath, ext, defaultName) => {
   if (!isOwnedOutput(srcPath)) {
     throw new Error('保存できるのはアプリが生成した楽譜ファイルのみです')
   }
+  const normalizedExt = String(ext || '').replace(/^\./, '').toLowerCase()
+  if (!pu.OUTPUT_EXTENSIONS.includes(`.${normalizedExt}`)
+      || path.extname(srcPath).toLowerCase() !== `.${normalizedExt}`) {
+    throw new Error('保存形式と生成ファイルの形式が一致しません')
+  }
+  const srcStat = await fs.promises.stat(srcPath)
+  if (!srcStat.isFile() || srcStat.size <= 0) throw new Error('保存元ファイルが空か不正です')
   const result = await dialog.showSaveDialog(mainWindow, {
-    defaultPath: defaultName || `楽譜.${ext}`,
-    filters: [{ name: String(ext).toUpperCase(), extensions: [ext] }],
+    defaultPath: defaultName || `楽譜.${normalizedExt}`,
+    filters: [{ name: normalizedExt.toUpperCase(), extensions: [normalizedExt] }],
   })
   if (result.canceled) return null
   await fs.promises.copyFile(srcPath, result.filePath)
@@ -137,6 +398,8 @@ ipcMain.handle('open-external', async (_, filePath) => {
   if (!isOwnedOutput(filePath)) {
     throw new Error('開けるのはアプリが生成した楽譜ファイルのみです')
   }
+  const st = await fs.promises.stat(filePath)
+  if (!st.isFile() || st.size <= 0) throw new Error('ファイルが空か不正です')
   const errMsg = await shell.openPath(filePath)
   if (errMsg) {
     throw new Error(`ファイルを開けませんでした: ${errMsg}`)
@@ -144,7 +407,7 @@ ipcMain.handle('open-external', async (_, filePath) => {
 })
 
 // 採譜実行
-ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '') => {
+ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '', progressToken = null) => {
   // 3.16: IPC境界で入力を再検証(拡張子allowlist + 通常ファイル)
   if (!pu.isAllowedAudioInput(inputPath)) {
     throw new Error('対応していない形式です(音声ファイルを選んでください)')
@@ -157,7 +420,7 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '
   }
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-'))
-  generatedRoots.add(tmpDir)  // 3.17: 終了時削除の対象に追跡
+  registerRoot(tmpDir, inputPath)  // 入力単位で追跡し、切替時にも削除
   const baseName = path.basename(inputPath, path.extname(inputPath))
   const outMusicxml = path.join(tmpDir, `${baseName}.musicxml`)
   const outPdf = path.join(tmpDir, `${baseName}.pdf`)
@@ -166,110 +429,61 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '
   const outChordChart = path.join(tmpDir, `${baseName}.chord.pdf`)  // コード譜(一次導線・#123/#116)
   const outConfView = path.join(tmpDir, `${baseName}.confview.pdf`)  // 解析ビュー(#121)
 
-  return new Promise((resolve, reject) => {
-    // 一旦(2026-07-22 ユーザー指示): ギター/ピアノ抽出モード。
-    // Demucsで other ステム(専用ギターステムが無いためギター+ピアノ+その他が混在)を
-    // 分離し、poly(多声)で検出する。monoは多声ステムをほぼ拾えない(実測5音)ため poly 必須。
-    // TABは --tab-mono で各拍の主旋律1音に絞り、物理的に常に演奏可能な単音TABにする。
-    const STEM = 'other'
-    const selected = 'poly'
-    const args = [
-      '-W', 'ignore::RuntimeWarning',
-      '-m', 'earpipe.pipeline', 'transcribe', inputPath,
-      '-o', outMusicxml,
-      '--pdf', outPdf,
-      '--midi', outMidi,
-      '--tab', outTab,
-      '--tab-mono',
-      '--chord-chart', outChordChart,
-      '--emit', `confview=${outConfView}`,
-      '--stem', STEM,
-      '--engine', selected,
-    ]
-    const safeTitle = pu.clampTitle(title)  // 3.19: 200文字上限
-    if (safeTitle) args.push('--title', safeTitle)
+  // 一旦(2026-07-22 ユーザー指示): ギター/ピアノ抽出モード。
+  const STEM = 'other'
+  const selected = pu.normalizeEngine(engine)
+  const args = [
+    'transcribe', inputPath,
+    '-o', outMusicxml,
+    '--pdf', outPdf,
+    '--midi', outMidi,
+    '--tab', outTab,
+    '--tab-mono',
+    '--chord-chart', outChordChart,
+    '--emit', `confview=${outConfView}`,
+    '--stem', STEM,
+    '--engine', selected,
+  ]
+  const safeTitle = pu.clampTitle(title)
+  if (safeTitle) args.push('--title', safeTitle)
 
-    // 3.6: mono以外はbasic-pitch用Pythonを渡すが、実在する場合のみ設定する
-    // (存在しないパスの強制でワーカー起動を壊さない。無ければエンジンが自動探索)
-    const env = { ...process.env }
-    if (selected !== 'mono') {
-      const bp = pu.resolveExistingPath(pu.basicPitchPythonCandidates(ENGINE_DIR, env))
-      if (bp) env.EARPIPE_BP_PYTHON = bp
-    }
+  const env = { ...process.env }
+  if (selected !== 'mono') {
+    const bp = pu.resolveExistingPath(pu.basicPitchPythonCandidates(ENGINE_DIR, env))
+    if (bp) env.EARPIPE_BP_PYTHON = bp
+  }
 
-    const proc = spawn(PYTHON, args, { cwd: ENGINE_DIR, env })
-    activeProcesses.add(proc)  // 3.18: 終了時killの対象に追跡
-
-    let stdout = ''
-    let stderr = ''
-
-    proc.stdout.on('data', (chunk) => {
-      stdout += chunk.toString()
-    })
-
-    proc.stderr.on('data', (chunk) => {
-      const line = chunk.toString().trim()
-      if (line) {
-        stderr += line + '\n'
-        event.sender.send('transcribe-progress', line)
+  try {
+    const result = await runEngineJson(args, env,
+      (line) => safeProgress(event.sender, line, progressToken), inputPath, progressToken)
+    const paths = { musicxml: outMusicxml, pdf: outPdf, midi: outMidi }
+    await ensureOutputs(paths)
+    try {
+      const st = await fs.promises.stat(outTab)
+      if (st.isFile() && st.size > 0) paths.tab = outTab
+    } catch { /* TABは任意 */ }
+    let chordChartUrl = null
+    try {
+      const st = await fs.promises.stat(outChordChart)
+      if (st.isFile() && st.size > 0) {
+        paths.chordChart = outChordChart
+        chordChartUrl = pathToFileURL(outChordChart).href
       }
-    })
-
-    proc.on('close', (code) => {
-      activeProcesses.delete(proc)
-      if (code !== 0) {
-        reject(new Error(`採譜エンジンがエラーで終了しました (code ${code})\n${stderr}`))
-        return
+    } catch { /* 任意 */ }
+    let confViewUrl = null
+    try {
+      const st = await fs.promises.stat(outConfView)
+      if (st.isFile() && st.size > 0) {
+        paths.confView = outConfView
+        confViewUrl = pathToFileURL(outConfView).href
       }
-      let result
-      try {
-        result = JSON.parse(stdout)
-      } catch {
-        reject(new Error('エンジン出力のパースに失敗しました'))
-        return
-      }
-      const paths = { musicxml: outMusicxml, pdf: outPdf, midi: outMidi }
-      // PDF埋め込み用の file URL はメイン側(node:url あり)で作る。これにより
-      // preload はローカルモジュール require が不要になり sandbox:true を維持できる。
-      const pdfUrl = pathToFileURL(outPdf).href
-      // 3.8: 成果物の実体(存在・非空)を確認してから成功応答する。
-      // TAB譜は任意出力: 生成できていれば paths.tab に載せる(失敗しても本体採譜は成功扱い)。
-      ensureOutputs(paths)
-        .then(async () => {
-          try {
-            const tabStat = await fs.promises.stat(outTab)
-            if (tabStat.isFile() && tabStat.size > 0) paths.tab = outTab
-          } catch { /* TAB は任意: 無ければレンダラ側でボタン非表示 */ }
-          // コード譜(#123)は一次導線。生成できていれば載せる(失敗しても本体は成功)。
-          let chordChartUrl = null
-          try {
-            const ccStat = await fs.promises.stat(outChordChart)
-            if (ccStat.isFile() && ccStat.size > 0) {
-              paths.chordChart = outChordChart
-              chordChartUrl = pathToFileURL(outChordChart).href
-            }
-          } catch { /* コード譜は任意 */ }
-          // 解析ビュー(#121: 信頼度ハイライト＋波形)。任意出力。
-          let confViewUrl = null
-          try {
-            const cvStat = await fs.promises.stat(outConfView)
-            if (cvStat.isFile() && cvStat.size > 0) {
-              paths.confView = outConfView
-              confViewUrl = pathToFileURL(outConfView).href
-            }
-          } catch { /* 解析ビューは任意 */ }
-          // #116: 追加形式の再採譜回避用に採譜済み MusicXML を保持
-          primaryMusicxmlByInput.set(inputPath, outMusicxml)
-          resolve({ ...result, paths, pdfUrl, chordChartUrl, confViewUrl })
-        })
-        .catch(reject)
-    })
-
-    proc.on('error', (err) => {
-      activeProcesses.delete(proc)
-      reject(new Error(`Pythonの起動に失敗しました: ${err.message}`))
-    })
-  })
+    } catch { /* 任意 */ }
+    primaryMusicxmlByInput.set(inputPath, outMusicxml)
+    return { ...result, paths, pdfUrl: pathToFileURL(outPdf).href, chordChartUrl, confViewUrl }
+  } catch (err) {
+    removeRoot(tmpDir)
+    throw err
+  }
 })
 
 // ── 楽器分離 → 選択楽器のみ採譜 ────────────────────────────────
@@ -277,25 +491,17 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '
 // 後段で採譜する。全楽器を一括採譜すると重すぎる(1曲10分超)ため、選択オンデマンドにする。
 
 // エンジンをspawnし stdout(JSON) を解析して返す。stderr行は onProgress へ流す。
-function runEngineJson(args, env, onProgress) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(PYTHON, ['-W', 'ignore::RuntimeWarning', '-m', 'earpipe.pipeline', ...args],
-      { cwd: ENGINE_DIR, env: env || { ...process.env } })
-    activeProcesses.add(proc)
-    let stdout = ''
-    let stderr = ''
-    proc.stdout.on('data', (c) => { stdout += c.toString() })
-    proc.stderr.on('data', (c) => {
-      const line = c.toString().trim()
-      if (line) { stderr += line + '\n'; if (onProgress) onProgress(line) }
-    })
-    proc.on('error', (e) => { activeProcesses.delete(proc); reject(new Error(`Pythonの起動に失敗しました: ${e.message}`)) })
-    proc.on('close', (code) => {
-      activeProcesses.delete(proc)
-      if (code !== 0) { reject(new Error(`エンジンがエラーで終了しました (code ${code})\n${stderr}`)); return }
-      try { resolve(JSON.parse(stdout)) } catch { reject(new Error('エンジン出力のパースに失敗しました')) }
-    })
-  })
+async function runEngineJson(args, env, onProgress, inputPath = null, operationToken = null) {
+  try {
+    return await runCapturedProcess(
+      PYTHON,
+      ['-W', 'ignore::RuntimeWarning', '-m', 'earpipe.pipeline', ...args],
+      { cwd: ENGINE_DIR, env, inputPath, operationToken, onProgress, parseJson: true },
+    )
+  } catch (err) {
+    if (err.code === 'ENOENT') throw new Error(`Pythonの起動に失敗しました: ${err.message}`)
+    throw err
+  }
 }
 
 // basic-pitch(poly)用の Python を見つけたら env に設定して返す(auto採譜のpoly経路用)
@@ -310,51 +516,57 @@ function bpEnv() {
 // yt-dlp(ユーザーマシン上でのローカル実行)でURLの音声をm4a化し、既存の
 // ファイル入力フローに合流させる。サーバーは一切関与しない(NF-023非衝突)。
 // サイト利用規約・楽曲の著作権はユーザー責任(レンダラ側に注意文言を常設)。
-ipcMain.handle('import-url', async (event, url) => {
+ipcMain.handle('import-url', async (event, url, progressToken = null) => {
   if (!pu.isAllowedMediaUrl(url)) {
-    throw new Error('URLの形式が正しくありません(https:// で始まる動画ページのURLを貼ってください)')
+    throw new Error('URLの形式が正しくないか、ローカルネットワーク宛てのURLです')
   }
   const ytdlp = pu.resolveExecutable(pu.ytDlpCandidates())
-  const dlDir = fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-dl-'))
-  generatedRoots.add(dlDir)
+  const dlDir = registerRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-dl-')))
   const args = pu.buildYtDlpArgs(url, dlDir)
-  return await new Promise((resolve, reject) => {
-    const proc = spawn(ytdlp, args, { env: { ...process.env } })
-    activeProcesses.add(proc)
-    let stdout = ''
-    let stderr = ''
-    proc.stdout.on('data', (c) => { stdout += c.toString() })
-    proc.stderr.on('data', (c) => {
-      const line = c.toString().trim()
-      if (line) { stderr += line + '\n'; event.sender.send('transcribe-progress', line) }
+  try {
+    const { stdout } = await runCapturedProcess(ytdlp, args, {
+      env: { ...process.env },
+      timeoutMs: DOWNLOAD_TIMEOUT_MS,
+      operationToken: progressToken,
+      onProgress: (line) => safeProgress(event.sender, line, progressToken),
     })
-    proc.on('error', (e) => {
-      activeProcesses.delete(proc)
-      reject(new Error(e.code === 'ENOENT'
-        ? 'yt-dlp が見つかりません。ターミナルで brew install yt-dlp を実行してから再試行してください'
-        : `yt-dlp の起動に失敗しました: ${e.message}`))
-    })
-    proc.on('close', (code) => {
-      activeProcesses.delete(proc)
-      if (code !== 0) {
-        reject(new Error('URLの取り込みに失敗しました。動画が非公開/削除済みか、'
-          + `yt-dlpが古い可能性があります(brew upgrade yt-dlp)\n${stderr.slice(-500)}`))
-        return
-      }
-      // --print after_move:filepath により確定した保存先がstdout末尾行に出る
-      const lines = stdout.trim().split('\n').filter(Boolean)
-      const filePath = lines[lines.length - 1]
-      if (!filePath || !fs.existsSync(filePath)) {
-        reject(new Error('取り込んだ音声ファイルが見つかりませんでした'))
-        return
-      }
-      resolve({ path: filePath, title: path.basename(filePath, path.extname(filePath)) })
-    })
-  })
+    const lines = stdout.trim().split(/\r?\n/).filter(Boolean)
+    const reportedPath = lines[lines.length - 1]
+    if (!reportedPath) throw new Error('取り込んだ音声ファイルの保存先を取得できませんでした')
+
+    let filePath
+    let realRoot
+    try {
+      filePath = fs.realpathSync.native(reportedPath)
+      realRoot = fs.realpathSync.native(dlDir)
+    } catch {
+      throw new Error('取り込んだ音声ファイルが見つかりませんでした')
+    }
+    const rel = path.relative(realRoot, filePath)
+    const st = fs.statSync(filePath)
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)
+        || !pu.isAllowedAudioInput(filePath) || !st.isFile() || st.size <= 0
+        || st.size > MAX_DOWNLOADED_BYTES) {
+      throw new Error('yt-dlpが管理外または不正なファイルを返しました')
+    }
+    associateSourceRoot(dlDir, filePath)
+    return { path: filePath, title: path.basename(filePath, path.extname(filePath)) }
+  } catch (err) {
+    removeRoot(dlDir)
+    if (err.code === 'ENOENT') {
+      const install = process.platform === 'darwin'
+        ? 'brew install yt-dlp'
+        : process.platform === 'win32'
+          ? 'winget install yt-dlp.yt-dlp'
+          : 'お使いのLinuxのパッケージ管理機能で yt-dlp をインストール'
+      throw new Error(`yt-dlp が見つかりません。${install}してから再試行してください`)
+    }
+    throw err
+  }
 })
 
 // 分離のみ実行 → 抽出できた楽器一覧を返す(採譜はしない)
-ipcMain.handle('separate-audio', async (event, inputPath) => {
+ipcMain.handle('separate-audio', async (event, inputPath, progressToken = null) => {
   if (!pu.isAllowedAudioInput(inputPath)) {
     throw new Error('対応していない形式です(音声ファイルを選んでください)')
   }
@@ -364,35 +576,71 @@ ipcMain.handle('separate-audio', async (event, inputPath) => {
     throw new Error('入力ファイルが見つからないか、ファイルではありません')
   }
 
-  const sepDir = fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-sep-'))
-  generatedRoots.add(sepDir)
-  const result = await runEngineJson(
-    ['separate', inputPath, '--out-dir', sepDir],
-    { ...process.env },  // Demucsは .venv-demucs を規約で自動検出
-    (line) => event.sender.send('transcribe-progress', line),
-  )
-  const stems = result.stems || {}
-  separationCache.set(inputPath, { dir: sepDir, stems })
-  // 抽出できた melodic 楽器のみ(wavが実在)を、ギター優先の順で返す
-  const instruments = INSTRUMENTS
-    .filter((it) => stems[it.id])
-    .map((it) => ({ id: it.id, label: it.label, hasTab: it.hasTab }))
-  if (instruments.length === 0) throw new Error('採譜できる楽器が見つかりませんでした')
-  return { instruments }
+  // 同じ入力を再処理する場合、旧ステム・譜面・実行中プロセスを先に解放する。
+  await releaseInputResources(inputPath, { preserveSource: true })
+  const sepDir = registerRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-sep-')), inputPath)
+  try {
+    const result = await runEngineJson(
+      ['separate', inputPath, '--out-dir', sepDir],
+      { ...process.env },
+      (line) => safeProgress(event.sender, line, progressToken),
+      inputPath,
+      progressToken,
+    )
+    const rawStems = result.stems || {}
+    const stems = {}
+    const realRoot = fs.realpathSync.native(sepDir)
+    for (const meta of INSTRUMENTS) {
+      const candidate = rawStems[meta.id]
+      if (!candidate) continue
+      try {
+        const real = fs.realpathSync.native(candidate)
+        const rel = path.relative(realRoot, real)
+        const st = fs.statSync(real)
+        if (rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel)
+            && path.extname(real).toLowerCase() === '.wav' && st.isFile() && st.size > 0) {
+          stems[meta.id] = real
+        }
+      } catch { /* 不正・欠落ステムは候補から落とす */ }
+    }
+    separationCache.set(inputPath, { dir: sepDir, stems })
+    const instruments = INSTRUMENTS
+      .filter((it) => stems[it.id])
+      .map((it) => ({ id: it.id, label: it.label, hasTab: it.hasTab }))
+    if (instruments.length === 0) throw new Error('採譜できる有効な楽器ステムが見つかりませんでした')
+    return { instruments }
+  } catch (err) {
+    removeRoot(sepDir)
+    separationCache.delete(inputPath)
+    throw err
+  }
 })
 
 // 選ばれた楽器(ステム)のwavだけを採譜して譜面を返す。分離は再実行しない。
-ipcMain.handle('transcribe-stem', async (event, inputPath, stemId, title = '', opts = {}) => {
+ipcMain.handle('transcribe-stem', async (event, inputPath, stemId, title = '', opts = {}, progressToken = null) => {
+  const meta = INSTRUMENTS.find((it) => it.id === stemId)
+  if (!meta) throw new Error('対応していない楽器です')
   const cache = separationCache.get(inputPath)
   if (!cache || !cache.stems[stemId]) {
     throw new Error('分離結果が見つかりません。もう一度ファイルを読み込んでください')
   }
   const wav = cache.stems[stemId]
-  const meta = INSTRUMENTS.find((it) => it.id === stemId)
-  const hasTab = !!(meta && meta.hasTab)
+  let wavStat
+  try {
+    const realRoot = fs.realpathSync.native(cache.dir)
+    const realWav = fs.realpathSync.native(wav)
+    const rel = path.relative(realRoot, realWav)
+    wavStat = fs.statSync(realWav)
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)
+        || !wavStat.isFile() || wavStat.size <= 0 || path.extname(realWav).toLowerCase() !== '.wav') {
+      throw new Error('invalid stem')
+    }
+  } catch {
+    throw new Error('分離済み音声が欠落または不正です。もう一度読み込んでください')
+  }
+  const hasTab = !!meta.hasTab
 
-  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-stem-'))
-  generatedRoots.add(outDir)
+  const outDir = registerRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-stem-')), inputPath)
   const outMusicxml = path.join(outDir, `${stemId}.musicxml`)
   const outPdf = path.join(outDir, `${stemId}.pdf`)
   const outMidi = path.join(outDir, `${stemId}.mid`)
@@ -412,46 +660,53 @@ ipcMain.handle('transcribe-stem', async (event, inputPath, stemId, title = '', o
   if (hasTab) args.push('--tab', outTab, '--tab-mono')
   // 任意上書き(分かる人は指定): BPM範囲/拍子/キー。allowlistで検証してから渡す。
   const o = opts || {}
-  if (/^\d+-\d+$/.test(String(o.bpmRange || ''))) args.push('--bpm-range', o.bpmRange)
+  const bpmRange = pu.normalizeBpmRange(String(o.bpmRange || ''))
+  if (bpmRange) args.push('--bpm-range', bpmRange)
   if (['4/4', '3/4', '2/4'].includes(o.beat)) args.push('--beat', o.beat)
-  if (/^[A-G]#?$/.test(String(o.keyTonic || ''))) {
+  if (/^[A-G](?:#|b)?$/.test(String(o.keyTonic || ''))) {
     args.push('--key', o.keyTonic, '--mode', o.keyMode === 'minor' ? 'minor' : 'major')
   }
   const safeTitle = pu.clampTitle(title)
-  if (safeTitle) args.push('--title', `${safeTitle} (${meta.label})`)
+  if (safeTitle) args.push('--title', pu.clampTitle(`${safeTitle} (${meta.label})`))
 
-  const result = await runEngineJson(args, bpEnv(),
-    (line) => event.sender.send('transcribe-progress', line))
+  try {
+    const result = await runEngineJson(args, bpEnv(),
+      (line) => safeProgress(event.sender, line, progressToken), inputPath, progressToken)
 
-  const paths = { musicxml: outMusicxml, pdf: outPdf, midi: outMidi }
-  await ensureOutputs(paths)
-  if (hasTab) {
+    const paths = { musicxml: outMusicxml, pdf: outPdf, midi: outMidi }
+    await ensureOutputs(paths)
+    if (hasTab) {
+      try {
+        const st = await fs.promises.stat(outTab)
+        if (st.isFile() && st.size > 0) paths.tab = outTab
+      } catch { /* TAB は任意 */ }
+    }
+    // コード譜(#123)は一次導線。生成できていれば paths/URL に載せる(失敗しても本体は成功)。
     try {
-      const st = await fs.promises.stat(outTab)
-      if (st.isFile() && st.size > 0) paths.tab = outTab
-    } catch { /* TAB は任意 */ }
-  }
-  // コード譜(#123)は一次導線。生成できていれば paths/URL に載せる(失敗しても本体は成功)。
-  try {
-    const cst = await fs.promises.stat(outChordChart)
-    if (cst.isFile() && cst.size > 0) paths.chordChart = outChordChart
-  } catch { /* コード譜は任意: 無ければレンダラ側でタブ非表示 */ }
-  // 解析ビュー(#121: 信頼度ハイライト＋波形)。任意出力。
-  try {
-    const vst = await fs.promises.stat(outConfView)
-    if (vst.isFile() && vst.size > 0) paths.confView = outConfView
-  } catch { /* 解析ビューは任意 */ }
-  const pdfUrl = pathToFileURL(outPdf).href
-  const tabUrl = paths.tab ? pathToFileURL(paths.tab).href : null
-  const chordChartUrl = paths.chordChart ? pathToFileURL(paths.chordChart).href : null
-  const confViewUrl = paths.confView ? pathToFileURL(paths.confView).href : null
-  // #116: 追加形式の再採譜回避用に採譜済み MusicXML を保持(inputPath基準)
-  primaryMusicxmlByInput.set(inputPath, outMusicxml)
-  return {
-    stem: stemId, label: meta.label,
-    n_notes: result.n_notes, engine: result.engine,
-    bpm: result.bpm, tuning_offset_cents: result.tuning_offset_cents,
-    paths, pdfUrl, tabUrl, chordChartUrl, confViewUrl,
+      const cst = await fs.promises.stat(outChordChart)
+      if (cst.isFile() && cst.size > 0) paths.chordChart = outChordChart
+    } catch { /* コード譜は任意: 無ければレンダラ側でタブ非表示 */ }
+    // 解析ビュー(#121: 信頼度ハイライト＋波形)。任意出力。
+    try {
+      const vst = await fs.promises.stat(outConfView)
+      if (vst.isFile() && vst.size > 0) paths.confView = outConfView
+    } catch { /* 解析ビューは任意 */ }
+    const pdfUrl = pathToFileURL(outPdf).href
+    const tabUrl = paths.tab ? pathToFileURL(paths.tab).href : null
+    const chordChartUrl = paths.chordChart ? pathToFileURL(paths.chordChart).href : null
+    const confViewUrl = paths.confView ? pathToFileURL(paths.confView).href : null
+    // #116: 追加形式の再採譜回避用に採譜済み MusicXML を保持(inputPath基準)
+    primaryMusicxmlByInput.set(inputPath, outMusicxml)
+    return {
+      stem: stemId, label: meta.label,
+      n_notes: result.n_notes, engine: result.engine,
+      bpm: result.bpm, tuning_offset_cents: result.tuning_offset_cents,
+      paths, pdfUrl, tabUrl, chordChartUrl, confViewUrl,
+    }
+  } catch (err) {
+    // エンジン成功後でも必須成果物が空・欠落なら、半端な一時成果物を残さない。
+    removeRoot(outDir)
+    throw err
   }
 })
 
@@ -472,20 +727,17 @@ const EXTRA_OUTPUTS = {
   nashville: { kind: 'analysis', ext: 'txt' },
 }
 
-function runEngine(args) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(PYTHON, ['-W', 'ignore::RuntimeWarning', '-m', 'earpipe.pipeline', ...args],
-      { cwd: ENGINE_DIR, env: { ...process.env } })
-    activeProcesses.add(proc)
-    let stderr = ''
-    proc.stderr.on('data', (d) => { stderr += d.toString() })
-    proc.on('error', (e) => { activeProcesses.delete(proc); reject(new Error(`Python起動失敗: ${e.message}`)) })
-    proc.on('close', (code) => {
-      activeProcesses.delete(proc)
-      if (code === 0) resolve()
-      else reject(new Error(`採譜エンジンがエラー終了 (code ${code})\n${stderr}`))
-    })
-  })
+async function runEngine(args, env = { ...process.env }, inputPath = null) {
+  try {
+    await runCapturedProcess(
+      PYTHON,
+      ['-W', 'ignore::RuntimeWarning', '-m', 'earpipe.pipeline', ...args],
+      { cwd: ENGINE_DIR, env, inputPath },
+    )
+  } catch (err) {
+    if (err.code === 'ENOENT') throw new Error(`Python起動失敗: ${err.message}`)
+    throw err
+  }
 }
 
 // 追加出力を1つ生成して保存する。savePath は E2E(EARPAPER_E2E=1)のときだけ引数指定を許し、
@@ -502,7 +754,14 @@ ipcMain.handle('export-extra', async (_, inputPath, key, e2eSavePath) => {
 
   let savePath
   if (process.env.EARPAPER_E2E === '1' && e2eSavePath) {
-    savePath = e2eSavePath
+    const realTmp = fs.realpathSync.native(os.tmpdir())
+    const candidate = path.resolve(e2eSavePath)
+    const rel = path.relative(realTmp, candidate)
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)
+        || path.extname(candidate).toLowerCase() !== `.${spec.ext}`) {
+      throw new Error('E2E保存先は一時ディレクトリ配下の正しい拡張子に限定されます')
+    }
+    savePath = candidate
   } else {
     const res = await dialog.showSaveDialog(mainWindow, {
       defaultPath: `楽譜.${key}.${spec.ext}`,
@@ -517,12 +776,13 @@ ipcMain.handle('export-extra', async (_, inputPath, key, e2eSavePath) => {
   // (Demucs分離+basic-pitch検出)をやり直さない。無い場合のみ音声から再採譜する。
   const cachedXml = primaryMusicxmlByInput.get(inputPath)
   if (cachedXml && fs.existsSync(cachedXml)) {
-    await runEngine(['render', '--from-musicxml', cachedXml, flag, `${key}=${savePath}`])
+    await runEngine(['render', '--from-musicxml', cachedXml, flag, `${key}=${savePath}`],
+      { ...process.env }, inputPath)
   } else {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-x-'))
-    generatedRoots.add(tmpDir)
+    const tmpDir = registerRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-x-')), inputPath)
     const tmpXml = path.join(tmpDir, 'base.musicxml')  // lilypond 等は -o(MusicXML)を要する
-    await runEngine(['transcribe', inputPath, '-o', tmpXml, flag, `${key}=${savePath}`, '--engine', 'auto'])
+    await runEngine(['transcribe', inputPath, '-o', tmpXml, flag, `${key}=${savePath}`, '--engine', 'auto'],
+      bpEnv(), inputPath)
   }
 
   // 生成物の実体(存在・非空)を確認してから成功応答(偽成功防止)

@@ -10,13 +10,18 @@ function basenameForDisplay(filePath) {
 }
 
 contextBridge.exposeInMainWorld('earpipe', {
-  transcribe: (filePath, engine, title) => ipcRenderer.invoke('transcribe', filePath, engine, title),
+  transcribe: (filePath, engine, title, progressToken) =>
+    ipcRenderer.invoke('transcribe', filePath, engine, title, progressToken),
   // 分離→選択楽器のみ採譜フロー
-  separateAudio: (filePath) => ipcRenderer.invoke('separate-audio', filePath),
-  transcribeStem: (filePath, stemId, title, opts) => ipcRenderer.invoke('transcribe-stem', filePath, stemId, title, opts),
+  separateAudio: (filePath, progressToken) =>
+    ipcRenderer.invoke('separate-audio', filePath, progressToken),
+  transcribeStem: (filePath, stemId, title, opts, progressToken) =>
+    ipcRenderer.invoke('transcribe-stem', filePath, stemId, title, opts, progressToken),
+  releaseInput: (filePath) => ipcRenderer.invoke('release-input', filePath),
+  cancelOperation: (token) => ipcRenderer.invoke('cancel-operation', token),
   openFileDialog: () => ipcRenderer.invoke('open-file-dialog'),
   // #128: URL取り込み(yt-dlpローカル実行)。成功で { path, title } を返す
-  importUrl: (url) => ipcRenderer.invoke('import-url', url),
+  importUrl: (url, progressToken) => ipcRenderer.invoke('import-url', url, progressToken),
   saveFile: (src, ext, name) => ipcRenderer.invoke('save-file', src, ext, name),
   // 詳細エクスポート(簡譜/度数/GP5等)。savePath は E2E 時のみ使用。
   exportExtra: (inputPath, key, e2eSavePath) =>
@@ -26,7 +31,7 @@ contextBridge.exposeInMainWorld('earpipe', {
   // 3.3: クロスプラットフォームな basename を renderer 側へ公開(純粋・sandbox安全)
   basenameForDisplay: (filePath) => basenameForDisplay(filePath),
   onProgress: (cb) => {
-    const handler = (_, msg) => cb(msg)
+    const handler = (_, payload) => cb(payload)
     ipcRenderer.on('transcribe-progress', handler)
     return () => ipcRenderer.removeListener('transcribe-progress', handler)
   },
