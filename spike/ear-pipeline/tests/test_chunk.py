@@ -138,3 +138,33 @@ class TestChunkDataclass:
             assert False, "frozen のはず"
         except dataclasses.FrozenInstanceError:
             pass
+
+class TestInputValidation:
+    def test_rejects_non_positive_or_extreme_sample_rate(self):
+        import pytest
+        y = np.zeros(1, dtype=np.float32)
+        for sr in (0, -1, 384001, 1.5):
+            with pytest.raises(ValueError):
+                split_into_chunks(y, sr)  # type: ignore[arg-type]
+
+    def test_rejects_non_finite_or_extreme_durations(self):
+        import pytest
+        y = np.zeros(1, dtype=np.float32)
+        for value in (0.0, -1.0, float('nan'), float('inf'), 86401.0):
+            with pytest.raises(ValueError):
+                split_into_chunks(y, SR, max_sec=value)
+        for value in (-1.0, float('nan'), float('inf'), 86401.0):
+            with pytest.raises(ValueError):
+                split_into_chunks(y, SR, min_silence_sec=value)
+
+    def test_rejects_stereo_nonnumeric_and_nonfinite_waveforms(self):
+        import pytest
+        bad = [
+            np.zeros((2, 2), dtype=np.float32),
+            np.array(['audio'], dtype=object),
+            np.array([np.nan], dtype=np.float32),
+            np.array([np.inf], dtype=np.float32),
+        ]
+        for y in bad:
+            with pytest.raises(ValueError):
+                split_into_chunks(y, SR)

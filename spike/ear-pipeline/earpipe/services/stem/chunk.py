@@ -22,6 +22,7 @@ max_sec を超えない範囲でチャンクに切り分ける。切断は「音
 """
 
 from dataclasses import dataclass
+import math
 
 import librosa
 import numpy as np
@@ -102,7 +103,20 @@ def split_into_chunks(
     Returns:
         Chunk のリスト(index昇順・区間は隙間なく連続)。空入力では空list。
     """
-    n = int(y.shape[0]) if y.ndim >= 1 else 0
+    if not isinstance(sr, (int, np.integer)) or not 1 <= int(sr) <= 384000:
+        raise ValueError("sr は1〜384000Hzの整数で指定してください")
+    if not math.isfinite(float(max_sec)) or not 0.001 <= float(max_sec) <= 86400:
+        raise ValueError("max_sec は0.001〜86400秒の有限値で指定してください")
+    if not math.isfinite(float(min_silence_sec)) or not 0 <= float(min_silence_sec) <= 86400:
+        raise ValueError("min_silence_sec は0〜86400秒の有限値で指定してください")
+    y = np.asarray(y)
+    if y.ndim != 1:
+        raise ValueError("y は1次元のモノラル波形で指定してください")
+    if not np.issubdtype(y.dtype, np.number):
+        raise ValueError("y は数値配列で指定してください")
+    if not np.isfinite(y).all():
+        raise ValueError("y にNaNまたは無限値を含めないでください")
+    n = int(y.shape[0])
     if n == 0:
         return []
 

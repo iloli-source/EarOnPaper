@@ -6,6 +6,7 @@
 
 import argparse
 import json
+import math
 import sys
 import shutil
 import tempfile
@@ -79,11 +80,18 @@ def _apply_bpm_override(
 ) -> float:
     """テンポの任意上書き。exact指定があれば置換、範囲指定なら推定値を
     ×2/÷2で範囲へ畳み込む(倍/半分の取り違え=オクターブ誤りを補正)。"""
-    if override:
-        return float(override)
+    if override is not None:
+        value = float(override)
+        if not math.isfinite(value) or not 10.0 <= value <= 1000.0:
+            raise ValueError(f"BPMは10〜1000の有限値で指定してください: {override!r}")
+        return value
     if rng:
         lo, hi = rng
+        if not all(math.isfinite(v) for v in (lo, hi)) or lo < 10.0 or hi > 1000.0 or hi <= lo:
+            raise ValueError(f"BPM範囲が不正です: {rng!r}")
         b = float(bpm_est)
+        if not math.isfinite(b) or b <= 0:
+            b = BPM_DEFAULT
         for _ in range(6):
             if b < lo:
                 b *= 2
@@ -92,7 +100,8 @@ def _apply_bpm_override(
             else:
                 break
         return b
-    return float(bpm_est)
+    value = float(bpm_est)
+    return value if math.isfinite(value) and value > 0 else BPM_DEFAULT
 
 
 def transcribe_file(
@@ -419,7 +428,7 @@ def _parse_bpm_range(rng: str | None) -> tuple[float, float] | None:
     if len(parts) != 2:
         raise ValueError(f"--bpm-range は 60-80 の形式で指定してください(指定: {rng!r})")
     lo, hi = float(parts[0]), float(parts[1])
-    if lo <= 0 or hi <= lo:
+    if not math.isfinite(lo) or not math.isfinite(hi) or lo < 10 or hi > 1000 or hi <= lo:
         raise ValueError(f"--bpm-range の範囲が不正です: {rng!r}")
     return (lo, hi)
 
@@ -702,8 +711,8 @@ def _run_render(args) -> int:
     from earpipe.services.notate.musicxml_read import notes_from_musicxml
 
     notes, bpm = notes_from_musicxml(args.from_musicxml)
-    if args.bpm:
-        bpm = args.bpm
+    if args.bpm is not None:
+        bpm = _apply_bpm_override(bpm, args.bpm, None)
     base = args.from_musicxml
     formats = _parse_format_specs(args.formats, base)
     analyses = _parse_analysis_specs(args.analyses, base)
@@ -797,6 +806,8 @@ def _run_chunk(args) -> int:
     """長尺音源分割(F-004): 無音優先で max-sec を超えないチャンク wav を書き出す。"""
     import soundfile as sf
 
+    if not math.isfinite(args.max_sec) or not 0.1 <= args.max_sec <= 86400:
+        raise ValueError("--max-sec は0.1〜86400秒の有限値で指定してください")
     y, sr = load_audio(args.input)
     chunks = split_into_chunks(y, sr, max_sec=args.max_sec)
     out_dir = Path(args.out_dir)
@@ -843,6 +854,10 @@ def _record_audio(seconds: float, samplerate: int):
     sounddevice は任意依存(ハードウェア必須でCI不可)。未導入時は導入方法を示して
     RuntimeError を送出する(黙って失敗しない)。
     """
+    if not math.isfinite(float(seconds)) or not 0.1 <= float(seconds) <= 86400:
+        raise RuntimeError("録音秒数は0.1〜86400秒の有限値で指定してください")
+    if not 8000 <= int(samplerate) <= 384000:
+        raise RuntimeError("サンプルレートは8000〜384000Hzで指定してください")
     try:
         import sounddevice as sd
     except ImportError as e:  # 任意依存

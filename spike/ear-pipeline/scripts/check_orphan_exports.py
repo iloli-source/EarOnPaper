@@ -65,30 +65,86 @@ def _resolve_from(node: ast.ImportFrom, current: Path) -> str | None:
 
 
 def _barrel_reexports(barrel: Path) -> dict[str, Path]:
-    """barrel __init__ の `from .sub import name` を name->定義ファイル に写像。"""
+    """barrel の通常importと遅延 ``_EXPORTS`` を定義ファイルへ写像。"""
     mapping: dict[str, Path] = {}
     tree = ast.parse(barrel.read_text(encoding="utf-8"))
     for node in tree.body:
-        if not isinstance(node, ast.ImportFrom):
+        if isinstance(node, ast.ImportFrom):
+            mod = _resolve_from(node, barrel)
+            if not mod:
+                continue
+            f = _module_to_file(mod)
+            if f is None:
+                continue
+            for alias in node.names:
+                mapping[alias.asname or alias.name] = f
             continue
-        mod = _resolve_from(node, barrel)
-        if not mod:
+        if not isinstance(node, ast.Assign) or not any(
+            isinstance(t, ast.Name) and t.id == "_EXPORTS" for t in node.targets
+        ) or not isinstance(node.value, ast.Dict):
             continue
-        f = _module_to_file(mod)
-        if f is None:
-            continue
-        for alias in node.names:
-            mapping[alias.asname or alias.name] = f
+        pkg = ".".join(barrel.parent.relative_to(ROOT).parts)
+        for key_node, value_node in zip(node.value.keys, node.value.values):
+            if not (
+                isinstance(key_node, ast.Constant)
+                and isinstance(key_node.value, str)
+                and isinstance(value_node, (ast.Tuple, ast.List))
+                and len(value_node.elts) >= 1
+                and isinstance(value_node.elts[0], ast.Constant)
+                and isinstance(value_node.elts[0].value, str)
+            ):
+                continue
+            mod = value_node.elts[0].value
+            if mod.startswith("."):
+                # importlib.import_module('.score', 'earpipe.services.notate') 相当
+                level = len(mod) - len(mod.lstrip("."))
+                suffix = mod[level:]
+                parts = pkg.split(".")
+                base = parts[: len(parts) - (level - 1)]
+                if suffix:
+                    base.extend(suffix.split("."))
+                mod = ".".join(base)
+            f = _module_to_file(mod)
+            if f is not None:
+                mapping[key_node.value] = f
     return mapping
 
 
 def _all_symbols(barrel: Path) -> list[str]:
+    """``__all__`` を安全に読む。
+
+    文字列リストの直書きに加え、遅延import用の ``list(_EXPORTS)`` も扱う。
+    AST形状を決め打ちして ``.elts`` へ触らず、未知の式は空として安全に倒す。
+    """
     tree = ast.parse(barrel.read_text(encoding="utf-8"))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and any(
-            getattr(t, "id", "") == "__all__" for t in node.targets
-        ):
-            return [e.value for e in node.value.elts if isinstance(e, ast.Constant)]
+    named_values: dict[str, ast.AST] = {}
+    all_value: ast.AST | None = None
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                named_values[target.id] = node.value
+                if target.id == "__all__":
+                    all_value = node.value
+    if all_value is None:
+        return []
+    try:
+        value = ast.literal_eval(all_value)
+    except (ValueError, TypeError):
+        value = None
+    if isinstance(value, (list, tuple, set)):
+        return [x for x in value if isinstance(x, str)]
+    if (
+        isinstance(all_value, ast.Call)
+        and isinstance(all_value.func, ast.Name)
+        and all_value.func.id == "list"
+        and len(all_value.args) == 1
+        and isinstance(all_value.args[0], ast.Name)
+    ):
+        source = named_values.get(all_value.args[0].id)
+        if isinstance(source, ast.Dict):
+            return [k.value for k in source.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)]
     return []
 
 

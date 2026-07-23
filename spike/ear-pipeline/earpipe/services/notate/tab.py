@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Sequence
 
 from earpipe.contracts import QuantizedNote
-from earpipe.services.notate.chord import estimate_chords
 from earpipe.services.notate.chord_shapes import diagram_svg, shape_for
 
 TUNING_GUITAR = (40, 45, 50, 55, 59, 64)  # 6弦(低E)→1弦(高E) のMIDI
@@ -571,6 +570,8 @@ def write_tab_pdf(notes: Sequence[QuantizedNote], bpm: float,
     import pypdf
 
     # コード帯は原音(多声)から推定する。monophonic の単旋律化は TAB 運指を
+    from earpipe.services.notate.chord import estimate_chords
+
     # 演奏可能にするための間引きであって、その単音を estimate_chords に渡すと
     # 和音が判定できずコード帯が消える(EOP tab-mono 回帰)。フレット割当だけ
     # 単旋律化し、コード推定は元の notes を使う。
