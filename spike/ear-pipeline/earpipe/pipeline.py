@@ -610,6 +610,22 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("--samplerate", type=int, default=44100, help="サンプルレート(既定44100)")
     pr.add_argument("--transcribe", action="store_true", help="録音後そのまま採譜する")
 
+    # render: 採譜済みMusicXMLから追加形式/解析を生成(再採譜なし・#116)。
+    prr = sub.add_parser(
+        "render",
+        help="採譜済みMusicXMLから追加形式/解析を生成(再採譜なし・#116)",
+    )
+    prr.add_argument("--from-musicxml", dest="from_musicxml", required=True,
+                     help="入力MusicXML(採譜済み中間物)")
+    prr.add_argument("--format", dest="formats", action="append", metavar="KEY[=PATH]",
+                     default=None, help="追加の出力形式(jianpu/leadsheet/ust/abc/lilypond/gp5)")
+    prr.add_argument("--analysis", dest="analyses", action="append", metavar="KEY[=PATH]",
+                     default=None, help="解析テキスト(movable_do/roman/nashville)")
+    prr.add_argument("--emit", dest="emits", action="append", metavar="KEY[=PATH][#k=v]",
+                     default=None, help="汎用エミッタ(音声不要のもの)")
+    prr.add_argument("--bpm", type=float, default=None, help="テンポ上書き(既定はMusicXMLの値)")
+    prr.add_argument("--title", default=None, help="タイトル(任意)")
+
     args = p.parse_args(argv)
 
     if args.command == "separate":
@@ -627,6 +643,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "record":
         return _run_record(args)
+    if args.command == "render":
+        return _run_render(args)
 
     out = args.output or str(Path(args.input).with_suffix(".musicxml"))
     formats = _parse_format_specs(args.formats, args.input)
@@ -665,6 +683,51 @@ def main(argv: list[str] | None = None) -> int:
     summary["output"] = out
     summary["rights"] = rights_summary()  # F-073: 権利注意を成果物に添える
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _run_render(args) -> int:
+    """採譜済みMusicXMLから追加形式/解析/エミッタを生成する(再採譜なし・#116)。
+
+    Demucs 分離 + basic-pitch 多声検出をやり直さず、MusicXML を notes/bpm に
+    復元して dispatch_format/dispatch_analysis/emit を回す。GUI の「詳細
+    エクスポート」が採譜済み中間物を再利用して各形式を高速生成するための入口。
+    """
+    from earpipe.services.notate.musicxml_read import notes_from_musicxml
+
+    notes, bpm = notes_from_musicxml(args.from_musicxml)
+    if args.bpm:
+        bpm = args.bpm
+    base = args.from_musicxml
+    formats = _parse_format_specs(args.formats, base)
+    analyses = _parse_analysis_specs(args.analyses, base)
+    emits = _parse_emit_specs(args.emits, base)
+    title = args.title or Path(args.from_musicxml).stem
+
+    result: dict = {"source_musicxml": str(args.from_musicxml), "bpm": bpm}
+    if formats:
+        ctx = DispatchContext(
+            notes=notes, bpm=bpm, title=title,
+            musicxml_path=Path(args.from_musicxml),
+        )
+        result["formats"] = [
+            {"key": key, "path": str(dispatch_format(key, ctx, out)[0])}
+            for key, out in formats
+        ]
+    if analyses:
+        actx = AnalysisContext(notes=notes, bpm=bpm)
+        result["analyses"] = [
+            {"key": key, "path": str(dispatch_analysis(key, actx, out))}
+            for key, out in analyses
+        ]
+    if emits:
+        ectx = EmitContext(notes=notes, bpm=bpm, title=title,
+                           musicxml_path=Path(args.from_musicxml))
+        result["emits"] = [
+            {"key": key, "path": str(run_emit(key, replace(ectx, params=params), out))}
+            for key, out, params in emits
+        ]
+    print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
 

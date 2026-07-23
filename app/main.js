@@ -18,6 +18,11 @@ const activeProcesses = new Set()
 // 分離(Demucs)は重いので1入力につき1回だけ実行し、選ばれた楽器だけ後段で採譜する。
 const separationCache = new Map()
 
+// 採譜済み中間物のキャッシュ: inputPath -> MusicXML パス(#116)。
+// 追加形式(簡譜/度数/移動ド等)を出す際、音声からのフル再採譜(Demucs+basic-pitch)を
+// やり直さず、この採譜済み MusicXML から render サブコマンドで高速生成するために保持する。
+const primaryMusicxmlByInput = new Map()
+
 // 抽出楽器のメタ(表示順)。6-stem(htdemucs_6s)でギター/ピアノを分離して個別提示する。
 // drums(非音程)と other(残差)は除外。ギターをデフォルト先頭にしTABを持たせる。
 // ※ピアノは分離品質が実験的(音漏れ多め)だが、選択肢として提示する。
@@ -231,6 +236,8 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '
             const tabStat = await fs.promises.stat(outTab)
             if (tabStat.isFile() && tabStat.size > 0) paths.tab = outTab
           } catch { /* TAB は任意: 無ければレンダラ側でボタン非表示 */ }
+          // #116: 追加形式の再採譜回避用に採譜済み MusicXML を保持
+          primaryMusicxmlByInput.set(inputPath, outMusicxml)
           resolve({ ...result, paths, pdfUrl })
         })
         .catch(reject)
@@ -353,6 +360,8 @@ ipcMain.handle('transcribe-stem', async (event, inputPath, stemId, title = '', o
   }
   const pdfUrl = pathToFileURL(outPdf).href
   const tabUrl = paths.tab ? pathToFileURL(paths.tab).href : null
+  // #116: 追加形式の再採譜回避用に採譜済み MusicXML を保持(inputPath基準)
+  primaryMusicxmlByInput.set(inputPath, outMusicxml)
   return {
     stem: stemId, label: meta.label,
     n_notes: result.n_notes, engine: result.engine,
@@ -418,11 +427,18 @@ ipcMain.handle('export-extra', async (_, inputPath, key, e2eSavePath) => {
     savePath = res.filePath
   }
 
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-x-'))
-  generatedRoots.add(tmpDir)
-  const tmpXml = path.join(tmpDir, 'base.musicxml')  // lilypond 等は -o(MusicXML)を要する
   const flag = spec.kind === 'format' ? '--format' : '--analysis'
-  await runEngine(['transcribe', inputPath, '-o', tmpXml, flag, `${key}=${savePath}`, '--engine', 'auto'])
+  // #116: 採譜済み中間物(MusicXML)があれば render で再利用し、フル再採譜
+  // (Demucs分離+basic-pitch検出)をやり直さない。無い場合のみ音声から再採譜する。
+  const cachedXml = primaryMusicxmlByInput.get(inputPath)
+  if (cachedXml && fs.existsSync(cachedXml)) {
+    await runEngine(['render', '--from-musicxml', cachedXml, flag, `${key}=${savePath}`])
+  } else {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-x-'))
+    generatedRoots.add(tmpDir)
+    const tmpXml = path.join(tmpDir, 'base.musicxml')  // lilypond 等は -o(MusicXML)を要する
+    await runEngine(['transcribe', inputPath, '-o', tmpXml, flag, `${key}=${savePath}`, '--engine', 'auto'])
+  }
 
   // 生成物の実体(存在・非空)を確認してから成功応答(偽成功防止)
   const st = fs.existsSync(savePath) ? fs.statSync(savePath) : null
