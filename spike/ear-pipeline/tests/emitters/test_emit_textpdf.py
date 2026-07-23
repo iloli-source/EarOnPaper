@@ -55,6 +55,44 @@ def test_emit_leadsheet_writes_nonempty_pdf(tmp_path: Path) -> None:
     assert out.read_bytes().startswith(b"%PDF")
 
 
+def test_emit_jianpu_content_encodes_input_degrees(tmp_path: Path) -> None:
+    # #115: 非空PDFだけでなく、簡譜の数字が入力音高(度数)を正しく表すことを検証。
+    import pypdf
+
+    # C長調のドレミファソ(midi 60..67, 同一オクターブ) = 度数 1 2 3 4 5
+    notes = [
+        QuantizedNote(start_beats=float(i), dur_beats=1.0, midi=m, confidence=0.9)
+        for i, m in enumerate([60, 62, 64, 65, 67])
+    ]
+    out = tmp_path / "deg.pdf"
+    textpdf.emit(EmitContext(notes=notes, bpm=120.0, title="scale"), out)
+    text = " ".join(p.extract_text() or "" for p in pypdf.PdfReader(str(out)).pages)
+    text_1line = text.replace("\n", " ")
+
+    assert "Jianpu" in text  # 簡譜ヘッダ(結線)
+    # 入力音高がそのまま度数列 1 2 3 4 5 として描画される(内容が入力に相関)
+    assert "1 2 3 4 5" in text_1line
+
+
+def test_emit_jianpu_content_differs_with_input(tmp_path: Path) -> None:
+    # #115: 入力が変われば簡譜内容も変わる(固定テンプレの偽成功でない)。
+    import pypdf
+
+    def jianpu_text(midis: list[int]) -> str:
+        notes = [
+            QuantizedNote(start_beats=float(i), dur_beats=1.0, midi=m, confidence=0.9)
+            for i, m in enumerate(midis)
+        ]
+        out = tmp_path / f"j_{midis[0]}_{len(midis)}.pdf"
+        textpdf.emit(EmitContext(notes=notes, bpm=120.0, title="x"), out)
+        return " ".join(
+            p.extract_text() or "" for p in pypdf.PdfReader(str(out)).pages
+        ).replace("\n", " ")
+
+    assert "1 2 3" in jianpu_text([60, 62, 64])   # ドレミ
+    assert "5 4 3" in jianpu_text([67, 65, 64])   # ソファミ
+
+
 def test_emitter_contract_attributes() -> None:
     # Arrange / Act / Assert
     assert textpdf.KEY == "textpdf"
