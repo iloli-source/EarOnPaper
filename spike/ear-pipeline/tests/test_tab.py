@@ -223,6 +223,17 @@ class TestReduceToMelody:
     def test_empty(self):
         assert _reduce_to_melody([]) == []
 
+    def test_drops_low_confidence_overtone(self):
+        # #119: 高信頼の主旋律音(60)＋低信頼の倍音らしき高音(79)が同時。
+        # 無条件スカイラインだと79へ跳ねる(音が飛ぶ)。低信頼倍音は除外し60を選ぶ。
+        melody = _reduce_to_melody([qn(0, 1, 60, conf=0.9), qn(0, 1, 79, conf=0.1)])
+        assert [n.midi for n in melody] == [60]
+
+    def test_keeps_highest_when_confidence_comparable(self):
+        # 信頼度が同程度なら従来どおり最高音(スカイライン)を主旋律に採る
+        melody = _reduce_to_melody([qn(0, 1, 60, conf=0.8), qn(0, 1, 67, conf=0.75)])
+        assert [n.midi for n in melody] == [67]
+
     def test_monophonic_tab_has_no_overlaps(self):
         # Arrange: 押さえられない密集和音を各拍に配置
         notes = []

@@ -82,18 +82,31 @@ def _group_by_start(notes: Sequence[QuantizedNote]) -> list[list[QuantizedNote]]
     return [groups[k] for k in sorted(groups)]
 
 
+# 主旋律選択で倍音/幽霊を除外する信頼度比。グループ最大信頼度に対しこの比
+# 未満の音は主旋律候補から外す(#119: 低信頼の高音倍音へ跳ねて音が飛ぶのを抑制)。
+_MELODY_GHOST_RATIO = 0.5
+
+
 def _reduce_to_melody(notes: Sequence[QuantizedNote]) -> list[QuantizedNote]:
     """各オンセット群から最高音(スカイライン=主旋律)1音だけ残して単旋律化する。
 
     多声ステム(other等)をpoly検出した音符列は和音を含み、そのままだと物理的に
     押さえられないTAB配置が出る。各拍で最高音(同点は高信頼度)を主旋律として選ぶと、
     同時発音が常に1音になり、TABは必ず演奏可能になる。
+
+    ただし無条件スカイラインは、弱く検出された高音倍音(幽霊)に跳ねて主旋律が
+    高フレットへ飛ぶ(#119)。グループ最大信頼度に対し極端に弱い音は候補から除外
+    してからスカイラインを採ることで、可読性の高い連続した主旋律にする。
     """
     if not notes:
         return []
     melody: list[QuantizedNote] = []
     for group in _group_by_start(notes):
-        melody.append(max(group, key=lambda n: (n.midi, n.confidence)))
+        cmax = max(n.confidence for n in group)
+        # 幽霊/倍音除去。全音が弱い(=cmax自体が低い)場合は全候補を残し欠落を防ぐ。
+        strong = [n for n in group if n.confidence >= cmax * _MELODY_GHOST_RATIO]
+        candidates = strong or list(group)
+        melody.append(max(candidates, key=lambda n: (n.midi, n.confidence)))
     return melody
 
 
