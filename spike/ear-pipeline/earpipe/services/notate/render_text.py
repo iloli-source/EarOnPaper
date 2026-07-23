@@ -46,6 +46,8 @@ from earpipe.contracts import QuantizedNote
 from earpipe.services.notate.chord import ChordSpan
 from earpipe.services.notate.jianpu import to_jianpu
 from earpipe.services.notate.leadsheet import to_leadsheet
+from earpipe.services.notate.movable_do import to_movable_do
+from earpipe.services.notate.roman_nashville import to_nashville, to_roman
 
 # A4縦(engrave.py / tab.py と同一ページ寸法)。
 _PAGE_W: int = 2100
@@ -175,6 +177,50 @@ def _render_svg_pages(
         parts.append("</svg>")
         svgs.append("".join(parts))
     return svgs
+
+
+def render_degrees_pdf(
+    chords: list[ChordSpan],
+    key_tonic_pc: int,
+    mode: str,
+    out_path: str | Path,
+    title: str | None = None,
+    style: str = "roman",
+) -> Path:
+    """コード進行の度数(ローマ数字/ナッシュビル)をPDFに描画する(#122)。
+
+    簡譜/リードシートと同じ text→SVG→PDF 経路で、五線譜/TABと並ぶ視覚出力に
+    する。style='roman' でローマ数字度数、'nashville' でナッシュビル番号。
+    どの調基準かを隠さないよう主音を subhead に明記する。
+    """
+    if style == "nashville":
+        symbols = to_nashville(chords, key_tonic_pc, mode)
+        label = "Nashville numbers"
+    else:
+        symbols = to_roman(chords, key_tonic_pc, mode)
+        label = "Roman numeral degrees"
+    text = " ".join(symbols) if symbols else "(no chords)"
+    subhead = f"{label} | tonic pc={key_tonic_pc % 12} {mode}"
+    svgs = _render_svg_pages(text, title, subhead)
+    return _write_pdf_from_svgs(svgs, Path(out_path))
+
+
+def render_movable_do_pdf(
+    notes: list[QuantizedNote],
+    key_tonic_pc: int,
+    out_path: str | Path,
+    title: str | None = None,
+) -> Path:
+    """移動ド階名(do re mi …)をPDFに描画する(#122)。
+
+    簡譜/リードシートと同じ text→SVG→PDF 経路。何調基準の階名かを隠さない
+    よう主音を subhead に明記する。
+    """
+    syllables = to_movable_do(notes, key_tonic_pc)
+    text = " ".join(syllables) if syllables else "(no notes)"
+    subhead = f"Movable-do solfege | tonic pc={key_tonic_pc % 12}"
+    svgs = _render_svg_pages(text, title, subhead)
+    return _write_pdf_from_svgs(svgs, Path(out_path))
 
 
 def _write_pdf_from_svgs(svgs: Sequence[str], out_path: Path) -> Path:
