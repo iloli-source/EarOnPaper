@@ -103,6 +103,30 @@ function clampTitle(title, max = MAX_TITLE_LEN) {
   return String(title == null ? '' : title).slice(0, max)
 }
 
+// 保存初期名の曲名部分をスネークケース化する(ユーザー要望 2026-07-24)。
+// 空白・ハイフン・ファイル名不正文字・括弧類を _ へ潰し、日本語等の非ASCIIは保持。
+// preload は sandbox で require 不可のため、同一実装を preload.js にインライン複製している。
+const SNAKE_STEM_MAX = 80
+
+function snakeFileStem(title, max = SNAKE_STEM_MAX) {
+  if (typeof title !== 'string') return 'score'
+  const snaked = title
+    .replace(/[\s/\\:*?"<>|()[\]{}'!&,;#~^$%+=@`-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^[_.]+|[_.]+$/g, '')
+    .toLowerCase()
+    .slice(0, max)
+  return snaked || 'score'
+}
+
+// 保存ダイアログの初期ファイル名: 曲名_楽器_種別.拡張子(kind/stemIdは省略可)
+function exportFileName(title, stemId, kind, ext) {
+  const parts = [snakeFileStem(title)]
+  if (stemId) parts.push(String(stemId))
+  if (kind) parts.push(String(kind))
+  return `${parts.join('_')}.${String(ext).replace(/^\./, '')}`
+}
+
 // GUIから渡されるBPM範囲をCLIへ渡す前に正規化する。
 // 20〜400BPMに制限し、非有限値・逆転範囲・巨大整数を拒否する。
 function normalizeBpmRange(value, min = 20, max = 400) {
@@ -216,6 +240,8 @@ module.exports = {
   basicPitchPythonCandidates,
   resolveExistingPath,
   clampTitle,
+  snakeFileStem,
+  exportFileName,
   normalizeBpmRange,
   boundedPositiveInt,
   normalizeEngine,

@@ -9,6 +9,25 @@ function basenameForDisplay(filePath) {
   return parts[parts.length - 1] || ''
 }
 
+// 保存初期名の曲名スネーク化(platform-utils.snakeFileStem と同一実装・上記の理由でインライン)
+function snakeFileStem(title, max = 80) {
+  if (typeof title !== 'string') return 'score'
+  const snaked = title
+    .replace(/[\s/\\:*?"<>|()[\]{}'!&,;#~^$%+=@`-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^[_.]+|[_.]+$/g, '')
+    .toLowerCase()
+    .slice(0, max)
+  return snaked || 'score'
+}
+
+function exportFileName(title, stemId, kind, ext) {
+  const parts = [snakeFileStem(title)]
+  if (stemId) parts.push(String(stemId))
+  if (kind) parts.push(String(kind))
+  return `${parts.join('_')}.${String(ext).replace(/^\./, '')}`
+}
+
 contextBridge.exposeInMainWorld('earpipe', {
   transcribe: (filePath, engine, title, progressToken) =>
     ipcRenderer.invoke('transcribe', filePath, engine, title, progressToken),
@@ -24,12 +43,14 @@ contextBridge.exposeInMainWorld('earpipe', {
   importUrl: (url, progressToken) => ipcRenderer.invoke('import-url', url, progressToken),
   saveFile: (src, ext, name) => ipcRenderer.invoke('save-file', src, ext, name),
   // 詳細エクスポート(簡譜/度数/GP5等)。savePath は E2E 時のみ使用。
-  exportExtra: (inputPath, key, e2eSavePath) =>
-    ipcRenderer.invoke('export-extra', inputPath, key, e2eSavePath),
+  exportExtra: (inputPath, key, e2eSavePath, defaultName) =>
+    ipcRenderer.invoke('export-extra', inputPath, key, e2eSavePath, defaultName),
   openExternal: (filePath) => ipcRenderer.invoke('open-external', filePath),
   getPathForFile: (file) => webUtils.getPathForFile(file),
   // 3.3: クロスプラットフォームな basename を renderer 側へ公開(純粋・sandbox安全)
   basenameForDisplay: (filePath) => basenameForDisplay(filePath),
+  // 保存初期名: 曲名_楽器_種別.拡張子(スネークケース・2026-07-24要望)
+  exportFileName: (title, stemId, kind, ext) => exportFileName(title, stemId, kind, ext),
   onProgress: (cb) => {
     const handler = (_, payload) => cb(payload)
     ipcRenderer.on('transcribe-progress', handler)

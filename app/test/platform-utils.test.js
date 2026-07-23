@@ -173,3 +173,41 @@ test('selectRootsForRelease: URL元音声は再分離時だけ保持する', () 
   )
   assert.deepEqual(pu.selectRootsForRelease(undefined, undefined, true), [])
 })
+
+// 保存初期名の曲名スネーク化(ユーザー要望 2026-07-24: 楽器名固定で毎回上書きになるのを防ぐ)
+test('snakeFileStem: 空白・ハイフン・記号を _ に潰しASCIIは小文字化', () => {
+  assert.strictEqual(
+    pu.snakeFileStem('Dream Theater - Another Day [OFFICIAL VIDEO]'),
+    'dream_theater_another_day_official_video',
+  )
+  assert.strictEqual(pu.snakeFileStem('A  B\tC'), 'a_b_c')
+  assert.strictEqual(pu.snakeFileStem('a/b\\c:d*e?f"g<h>i|j'), 'a_b_c_d_e_f_g_h_i_j')
+})
+
+test('snakeFileStem: 日本語はそのまま保持し前後の _ と . を除去', () => {
+  assert.strictEqual(pu.snakeFileStem('かえるのうた mp3'), 'かえるのうた_mp3')
+  assert.strictEqual(pu.snakeFileStem('  .テスト曲.  '), 'テスト曲')
+})
+
+test('snakeFileStem: 空・非文字列はフォールバック、長大入力は80字に切詰め', () => {
+  assert.strictEqual(pu.snakeFileStem(''), 'score')
+  assert.strictEqual(pu.snakeFileStem('***'), 'score')
+  assert.strictEqual(pu.snakeFileStem(null), 'score')
+  const long = pu.snakeFileStem('x'.repeat(300))
+  assert.strictEqual(long.length, 80)
+})
+
+test('exportFileName: 曲名_楽器_種別.拡張子 を組み立てる(kind省略可)', () => {
+  assert.strictEqual(
+    pu.exportFileName('Dream Theater - Another Day', 'guitar', 'tab', 'pdf'),
+    'dream_theater_another_day_guitar_tab.pdf',
+  )
+  assert.strictEqual(
+    pu.exportFileName('Song', 'piano', null, 'mid'),
+    'song_piano.mid',
+  )
+  assert.strictEqual(
+    pu.exportFileName('', null, 'jianpu', 'pdf'),
+    'score_jianpu.pdf',
+  )
+})

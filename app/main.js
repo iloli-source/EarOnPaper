@@ -384,8 +384,10 @@ ipcMain.handle('save-file', async (_, srcPath, ext, defaultName) => {
   }
   const srcStat = await fs.promises.stat(srcPath)
   if (!srcStat.isFile() || srcStat.size <= 0) throw new Error('保存元ファイルが空か不正です')
+  // 初期名はbasename化してパス区切り混入を防ぐ(曲名スネーク名は renderer 側で生成)
+  const safeDefault = pu.basenameForDisplay(String(defaultName || ''))
   const result = await dialog.showSaveDialog(mainWindow, {
-    defaultPath: defaultName || `楽譜.${normalizedExt}`,
+    defaultPath: safeDefault || `楽譜.${normalizedExt}`,
     filters: [{ name: normalizedExt.toUpperCase(), extensions: [normalizedExt] }],
   })
   if (result.canceled) return null
@@ -742,7 +744,7 @@ async function runEngine(args, env = { ...process.env }, inputPath = null) {
 
 // 追加出力を1つ生成して保存する。savePath は E2E(EARPAPER_E2E=1)のときだけ引数指定を許し、
 // それ以外は必ず保存ダイアログを出す(本番でレンダラが任意パスへ書けないようにする)。
-ipcMain.handle('export-extra', async (_, inputPath, key, e2eSavePath) => {
+ipcMain.handle('export-extra', async (_, inputPath, key, e2eSavePath, defaultName) => {
   const spec = EXTRA_OUTPUTS[key]
   if (!spec) throw new Error('対応していない出力形式です')
   if (!pu.isAllowedAudioInput(inputPath)) throw new Error('入力音声が不正です')
@@ -763,8 +765,9 @@ ipcMain.handle('export-extra', async (_, inputPath, key, e2eSavePath) => {
     }
     savePath = candidate
   } else {
+    const extraDefault = pu.basenameForDisplay(String(defaultName || ''))
     const res = await dialog.showSaveDialog(mainWindow, {
-      defaultPath: `楽譜.${key}.${spec.ext}`,
+      defaultPath: extraDefault || `楽譜.${key}.${spec.ext}`,
       filters: [{ name: key, extensions: [spec.ext] }],
     })
     if (res.canceled) return null

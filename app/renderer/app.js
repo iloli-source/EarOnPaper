@@ -502,35 +502,35 @@ document.querySelectorAll('#view-toggle .view-btn').forEach((btn) => {
 document.getElementById('btn-export-pdf').addEventListener('click', async () => {
   const r = currentResult()
   if (!r?.paths?.pdf) return
-  const name = window.earpipe.basenameForDisplay(r.paths.pdf)
+  const name = window.earpipe.exportFileName(currentTitle, currentInstrument, 'score', 'pdf')
   await window.earpipe.saveFile(r.paths.pdf, 'pdf', name)
 })
 
 document.getElementById('btn-export-tab').addEventListener('click', async () => {
   const r = currentResult()
   if (!r?.paths?.tab) return
-  const name = window.earpipe.basenameForDisplay(r.paths.tab)
+  const name = window.earpipe.exportFileName(currentTitle, currentInstrument, 'tab', 'pdf')
   await window.earpipe.saveFile(r.paths.tab, 'pdf', name)
 })
 
 document.getElementById('btn-export-chord').addEventListener('click', async () => {
   const r = currentResult()
   if (!r?.paths?.chordChart) return
-  const name = window.earpipe.basenameForDisplay(r.paths.chordChart)
+  const name = window.earpipe.exportFileName(currentTitle, currentInstrument, 'chord', 'pdf')
   await window.earpipe.saveFile(r.paths.chordChart, 'pdf', name)
 })
 
 document.getElementById('btn-export-analysis').addEventListener('click', async () => {
   const r = currentResult()
   if (!r?.paths?.confView) return
-  const name = window.earpipe.basenameForDisplay(r.paths.confView)
+  const name = window.earpipe.exportFileName(currentTitle, currentInstrument, 'analysis', 'pdf')
   await window.earpipe.saveFile(r.paths.confView, 'pdf', name)
 })
 
 document.getElementById('btn-export-midi').addEventListener('click', async () => {
   const r = currentResult()
   if (!r?.paths?.midi) return
-  const name = window.earpipe.basenameForDisplay(r.paths.midi)
+  const name = window.earpipe.exportFileName(currentTitle, currentInstrument, null, 'mid')
   await window.earpipe.saveFile(r.paths.midi, 'mid', name)
 })
 
