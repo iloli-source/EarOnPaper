@@ -244,3 +244,40 @@ class TestReduceToMelody:
         # Assert: PDFが生成され、単旋律化で同時発音が消える
         assert out.exists() and out.stat().st_size > 0
         assert count_overlaps(assign_frets(_reduce_to_melody(notes))) == 0
+
+
+class TestMonophonicKeepsChords:
+    """回帰: --tab-mono(単旋律化)でもコード帯は原音(多声)から出す。
+
+    monophonic=True で estimate_chords を間引き後の単音に掛けると、和音判定
+    不能で全て N.C. になりコード帯が消える不具合の再発防止(EOP tab-mono)。
+    """
+
+    def _progression(self) -> list[QuantizedNote]:
+        # C→F→G→C 各4拍・3音同時の明確な和音進行
+        prog = {0.0: (60, 64, 67), 4.0: (65, 69, 72),
+                8.0: (67, 71, 74), 12.0: (60, 64, 67)}
+        return [qn(sb, 4, m) for sb, ms in prog.items() for m in ms]
+
+    def test_monophonic_still_detects_chords(self, tmp_path: Path):
+        # Arrange: 多声の和音進行
+        notes = self._progression()
+        out = tmp_path / "mono_chords.pdf"
+        # Act: 単旋律TAB化してもコード推定は原音で行われるべき
+        result = write_tab_pdf(notes, bpm=120, out_pdf=out, monophonic=True)
+        # Assert: コードが消えていない(間引き後の単音なら n_chords==0 になる)
+        assert result["n_chords"] > 0
+
+    def test_render_gate_chord_names_in_svg(self):
+        # 描画ゲート: monophonic経路のSVGにコード名(C/F/G)が実際に載る
+        # (単字OCRは不安定なため出力SVGのテキストを直接照合する)
+        from earpipe.services.notate.chord import estimate_chords
+        from earpipe.services.notate.tab import _render_pages
+
+        notes = self._progression()
+        chord_spans = estimate_chords(notes, bpm=120)  # 原音から推定
+        tabs = assign_frets(_reduce_to_melody(notes))  # TABは単旋律
+        svg = " ".join(_render_pages(
+            tabs, 120, "T", 0, 0, chord_spans, chord_diagrams=False))
+        for name in ("C", "F", "G"):
+            assert f">{name}<" in svg, f"コード名 {name} がSVGに描画されていない"

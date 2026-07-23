@@ -397,12 +397,15 @@ def write_tab_pdf(notes: Sequence[QuantizedNote], bpm: float,
     import cairosvg
     import pypdf
 
-    if monophonic:
-        notes = _reduce_to_melody(notes)
-    tabs = assign_frets(notes)
+    # コード帯は原音(多声)から推定する。monophonic の単旋律化は TAB 運指を
+    # 演奏可能にするための間引きであって、その単音を estimate_chords に渡すと
+    # 和音が判定できずコード帯が消える(EOP tab-mono 回帰)。フレット割当だけ
+    # 単旋律化し、コード推定は元の notes を使う。
+    tab_notes = _reduce_to_melody(notes) if monophonic else notes
+    tabs = assign_frets(tab_notes)
     chord_spans = estimate_chords(notes, bpm)
     n_shifted = sum(1 for t in tabs if t.octave_shift)
-    n_dropped = len(list(notes)) - len(tabs) if notes else 0
+    n_dropped = len(list(tab_notes)) - len(tabs) if tab_notes else 0
     # 同時7音以上の切り捨て等もドロップに含まれる（assign_fretsの上限6音）
     n_dropped = max(0, n_dropped)
 
