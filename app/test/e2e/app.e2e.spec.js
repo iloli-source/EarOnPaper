@@ -95,6 +95,15 @@ test('採譜→PDF表示→エクスポートUIが揃う(受入1・2・3)', asyn
     expect(ccBuf.subarray(0, 5).toString()).toBe('%PDF-')
     // 既定表示がコード譜(一次導線)になっている
     await expect(win.locator('#view-toggle .view-btn[data-view="chord"]')).toHaveClass(/active/)
+
+    // #121: 解析ビュー(信頼度ハイライト＋波形)がタブ/エクスポートに出て、妥当なPDF
+    await expect(win.locator('#view-toggle .view-btn[data-view="analysis"]')).toBeVisible()
+    await expect(win.locator('#btn-export-analysis')).toBeVisible()
+    const cvPath = await win.evaluate(() => window.__earpipeTest?.lastResult?.paths?.confView)
+    expect(cvPath, '解析ビュー(confView)の paths が取得できない').toBeTruthy()
+    const cvBuf = fs.readFileSync(cvPath)
+    expect(cvBuf.length).toBeGreaterThan(1000)
+    expect(cvBuf.subarray(0, 5).toString()).toBe('%PDF-')
   } finally {
     await app.close()
   }

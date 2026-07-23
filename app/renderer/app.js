@@ -327,6 +327,7 @@ function renderScore(result) {
   let url = result.pdfUrl
   if (currentView === 'tab' && result.tabUrl) url = result.tabUrl
   else if (currentView === 'chord' && result.chordChartUrl) url = result.chordChartUrl
+  else if (currentView === 'analysis' && result.confViewUrl) url = result.confViewUrl
   if (!url) return
   const embed = document.createElement('embed')
   embed.src = url
@@ -351,16 +352,19 @@ function showInstrumentResult(result) {
   // 既定はコード譜 → TAB → 五線譜 の優先順(コード譜を一次に昇格)。
   const hasTab = !!result.tabUrl
   const hasChord = !!result.chordChartUrl
-  document.getElementById('view-toggle-card').hidden = !(hasTab || hasChord)
+  const hasAnalysis = !!result.confViewUrl
+  document.getElementById('view-toggle-card').hidden = !(hasTab || hasChord || hasAnalysis)
   document.querySelector('#view-toggle .view-btn[data-view="tab"]').hidden = !hasTab
   document.querySelector('#view-toggle .view-btn[data-view="chord"]').hidden = !hasChord
+  document.querySelector('#view-toggle .view-btn[data-view="analysis"]').hidden = !hasAnalysis
   currentView = hasChord ? 'chord' : (hasTab ? 'tab' : 'staff')
   updateViewButtons()
   renderScore(result)
 
-  // エクスポート: TAB/コード譜は生成できたときだけ表示
+  // エクスポート: TAB/コード譜/解析ビューは生成できたときだけ表示
   document.getElementById('btn-export-tab').hidden = !result.paths?.tab
   document.getElementById('btn-export-chord').hidden = !result.paths?.chordChart
+  document.getElementById('btn-export-analysis').hidden = !result.paths?.confView
 
   showState('done')
 }
@@ -399,6 +403,13 @@ document.getElementById('btn-export-chord').addEventListener('click', async () =
   if (!r?.paths?.chordChart) return
   const name = window.earpipe.basenameForDisplay(r.paths.chordChart)
   await window.earpipe.saveFile(r.paths.chordChart, 'pdf', name)
+})
+
+document.getElementById('btn-export-analysis').addEventListener('click', async () => {
+  const r = currentResult()
+  if (!r?.paths?.confView) return
+  const name = window.earpipe.basenameForDisplay(r.paths.confView)
+  await window.earpipe.saveFile(r.paths.confView, 'pdf', name)
 })
 
 document.getElementById('btn-export-midi').addEventListener('click', async () => {
