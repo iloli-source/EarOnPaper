@@ -76,11 +76,12 @@
             <div class="instrument-switch" id="instrument-switch"></div>
           </div>
 
-          <!-- 表示切替(ギターのみ: 五線譜/TAB) -->
+          <!-- 表示切替(コード譜/TAB/五線譜。コード譜は一次導線) -->
           <div class="result-card" id="view-toggle-card" hidden>
             <div class="result-card-title">表示</div>
             <div class="view-toggle" id="view-toggle">
-              <button class="view-btn active" data-view="tab">TAB譜</button>
+              <button class="view-btn active" data-view="chord">コード譜</button>
+              <button class="view-btn" data-view="tab">TAB譜</button>
               <button class="view-btn" data-view="staff">五線譜</button>
             </div>
           </div>
@@ -104,6 +105,9 @@
           <div class="result-card">
             <div class="result-card-title">エクスポート</div>
             <div class="export-buttons">
+              <button class="btn-export" id="btn-export-chord">
+                <span class="btn-export-icon">🎵</span>コード譜（PDF）
+              </button>
               <button class="btn-export" id="btn-export-pdf">
                 <span class="btn-export-icon">📄</span>五線譜（PDF）
               </button>

@@ -163,6 +163,7 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '
   const outPdf = path.join(tmpDir, `${baseName}.pdf`)
   const outMidi = path.join(tmpDir, `${baseName}.mid`)
   const outTab = path.join(tmpDir, `${baseName}.tab.pdf`)  // ギターTAB譜PDF(任意・採譜と同時生成)
+  const outChordChart = path.join(tmpDir, `${baseName}.chord.pdf`)  // コード譜(一次導線・#123/#116)
 
   return new Promise((resolve, reject) => {
     // 一旦(2026-07-22 ユーザー指示): ギター/ピアノ抽出モード。
@@ -179,6 +180,7 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '
       '--midi', outMidi,
       '--tab', outTab,
       '--tab-mono',
+      '--chord-chart', outChordChart,
       '--stem', STEM,
       '--engine', selected,
     ]
@@ -236,9 +238,18 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '
             const tabStat = await fs.promises.stat(outTab)
             if (tabStat.isFile() && tabStat.size > 0) paths.tab = outTab
           } catch { /* TAB は任意: 無ければレンダラ側でボタン非表示 */ }
+          // コード譜(#123)は一次導線。生成できていれば載せる(失敗しても本体は成功)。
+          let chordChartUrl = null
+          try {
+            const ccStat = await fs.promises.stat(outChordChart)
+            if (ccStat.isFile() && ccStat.size > 0) {
+              paths.chordChart = outChordChart
+              chordChartUrl = pathToFileURL(outChordChart).href
+            }
+          } catch { /* コード譜は任意 */ }
           // #116: 追加形式の再採譜回避用に採譜済み MusicXML を保持
           primaryMusicxmlByInput.set(inputPath, outMusicxml)
-          resolve({ ...result, paths, pdfUrl })
+          resolve({ ...result, paths, pdfUrl, chordChartUrl })
         })
         .catch(reject)
     })
@@ -328,12 +339,14 @@ ipcMain.handle('transcribe-stem', async (event, inputPath, stemId, title = '', o
   const outPdf = path.join(outDir, `${stemId}.pdf`)
   const outMidi = path.join(outDir, `${stemId}.mid`)
   const outTab = path.join(outDir, `${stemId}.tab.pdf`)
+  const outChordChart = path.join(outDir, `${stemId}.chord.pdf`)  // #123/#116: コード譜(一次導線)
 
   // 分離済みwavを直接採譜(--stem 指定なし=二重分離を避ける)。engine auto。
-  // ギター(other)は TAB も単旋律で生成する。
+  // ギター(other)は TAB も単旋律で生成する。コード譜は一次導線として常時生成する。
   const args = [
     'transcribe', wav,
     '-o', outMusicxml, '--pdf', outPdf, '--midi', outMidi,
+    '--chord-chart', outChordChart,
     '--engine', 'auto',
   ]
   if (hasTab) args.push('--tab', outTab, '--tab-mono')
@@ -358,15 +371,21 @@ ipcMain.handle('transcribe-stem', async (event, inputPath, stemId, title = '', o
       if (st.isFile() && st.size > 0) paths.tab = outTab
     } catch { /* TAB は任意 */ }
   }
+  // コード譜(#123)は一次導線。生成できていれば paths/URL に載せる(失敗しても本体は成功)。
+  try {
+    const cst = await fs.promises.stat(outChordChart)
+    if (cst.isFile() && cst.size > 0) paths.chordChart = outChordChart
+  } catch { /* コード譜は任意: 無ければレンダラ側でタブ非表示 */ }
   const pdfUrl = pathToFileURL(outPdf).href
   const tabUrl = paths.tab ? pathToFileURL(paths.tab).href : null
+  const chordChartUrl = paths.chordChart ? pathToFileURL(paths.chordChart).href : null
   // #116: 追加形式の再採譜回避用に採譜済み MusicXML を保持(inputPath基準)
   primaryMusicxmlByInput.set(inputPath, outMusicxml)
   return {
     stem: stemId, label: meta.label,
     n_notes: result.n_notes, engine: result.engine,
     bpm: result.bpm, tuning_offset_cents: result.tuning_offset_cents,
-    paths, pdfUrl, tabUrl,
+    paths, pdfUrl, tabUrl, chordChartUrl,
   }
 })
 

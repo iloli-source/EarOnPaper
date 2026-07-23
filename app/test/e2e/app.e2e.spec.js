@@ -24,10 +24,11 @@ test.beforeAll(() => {
   fs.writeFileSync(wavPath, makeWavBuffer({}))
 })
 
-// ドロップと同じ入口 startTranscribe をテストフック経由で起動する
-// (preload が正常ロードされていれば evaluate はメインワールドで走り earpipe を参照できる)。
+// ドロップと同じ入口 startFlow をテストフック経由で起動する。
+// startFlow は 楽器分離→既定楽器の採譜→DONE まで一気に進める(現行の分離フロー)。
+// (以前の startTranscribe はアプリが分離フローへ移行した際に廃止された)。
 async function triggerTranscribe(win, filePath) {
-  await win.evaluate((p) => window.__earpipeTest.startTranscribe(p, 'e2e'), filePath)
+  await win.evaluate((p) => window.__earpipeTest.startFlow(p, 'e2e'), filePath)
 }
 
 test('採譜→PDF表示→エクスポートUIが揃う(受入1・2・3)', async () => {
@@ -78,10 +79,22 @@ test('採譜→PDF表示→エクスポートUIが揃う(受入1・2・3)', asyn
     expect(midiBuf.length).toBeGreaterThan(0)
     expect(midiBuf.subarray(0, 4).toString()).toBe('MThd')
 
-    // 受入3: 3 形式のエクスポートボタンが有効
-    for (const id of ['#btn-export-pdf', '#btn-export-musicxml', '#btn-export-midi']) {
+    // 受入3: エクスポートボタン(五線譜/MIDI)が有効(現UIの実ボタン)
+    for (const id of ['#btn-export-pdf', '#btn-export-midi']) {
       await expect(win.locator(id)).toBeEnabled()
     }
+
+    // #123/#116: コード譜が一次導線に昇格している。表示タブとエクスポートボタンが
+    // 実UIに出て、生成物が妥当なPDFであることを実ボタン経路で固定する。
+    await expect(win.locator('#view-toggle .view-btn[data-view="chord"]')).toBeVisible()
+    await expect(win.locator('#btn-export-chord')).toBeVisible()
+    const ccPath = await win.evaluate(() => window.__earpipeTest?.lastResult?.paths?.chordChart)
+    expect(ccPath, 'コード譜(chordChart)の paths が取得できない').toBeTruthy()
+    const ccBuf = fs.readFileSync(ccPath)
+    expect(ccBuf.length).toBeGreaterThan(1000)
+    expect(ccBuf.subarray(0, 5).toString()).toBe('%PDF-')
+    // 既定表示がコード譜(一次導線)になっている
+    await expect(win.locator('#view-toggle .view-btn[data-view="chord"]')).toHaveClass(/active/)
   } finally {
     await app.close()
   }

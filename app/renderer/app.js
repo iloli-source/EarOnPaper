@@ -324,7 +324,9 @@ async function selectInstrument(stemId) {
 const scorePanel = document.getElementById('score-panel')
 
 function renderScore(result) {
-  const url = (currentView === 'tab' && result.tabUrl) ? result.tabUrl : result.pdfUrl
+  let url = result.pdfUrl
+  if (currentView === 'tab' && result.tabUrl) url = result.tabUrl
+  else if (currentView === 'chord' && result.chordChartUrl) url = result.chordChartUrl
   if (!url) return
   const embed = document.createElement('embed')
   embed.src = url
@@ -345,15 +347,20 @@ function showInstrumentResult(result) {
     result.bpm ? `${Math.round(result.bpm)} BPM` : '—'
   document.getElementById('stat-engine').textContent = result.engine ?? '—'
 
-  // 表示切替は TAB を持つ楽器(ギター)だけ。デフォルトは TAB。
+  // 表示切替: コード譜(一次導線・#116)は常時、TAB はギターだけ。
+  // 既定はコード譜 → TAB → 五線譜 の優先順(コード譜を一次に昇格)。
   const hasTab = !!result.tabUrl
-  document.getElementById('view-toggle-card').hidden = !hasTab
-  currentView = hasTab ? 'tab' : 'staff'
+  const hasChord = !!result.chordChartUrl
+  document.getElementById('view-toggle-card').hidden = !(hasTab || hasChord)
+  document.querySelector('#view-toggle .view-btn[data-view="tab"]').hidden = !hasTab
+  document.querySelector('#view-toggle .view-btn[data-view="chord"]').hidden = !hasChord
+  currentView = hasChord ? 'chord' : (hasTab ? 'tab' : 'staff')
   updateViewButtons()
   renderScore(result)
 
-  // エクスポート: TAB は生成できた楽器だけ表示
+  // エクスポート: TAB/コード譜は生成できたときだけ表示
   document.getElementById('btn-export-tab').hidden = !result.paths?.tab
+  document.getElementById('btn-export-chord').hidden = !result.paths?.chordChart
 
   showState('done')
 }
@@ -385,6 +392,13 @@ document.getElementById('btn-export-tab').addEventListener('click', async () => 
   if (!r?.paths?.tab) return
   const name = window.earpipe.basenameForDisplay(r.paths.tab)
   await window.earpipe.saveFile(r.paths.tab, 'pdf', name)
+})
+
+document.getElementById('btn-export-chord').addEventListener('click', async () => {
+  const r = currentResult()
+  if (!r?.paths?.chordChart) return
+  const name = window.earpipe.basenameForDisplay(r.paths.chordChart)
+  await window.earpipe.saveFile(r.paths.chordChart, 'pdf', name)
 })
 
 document.getElementById('btn-export-midi').addEventListener('click', async () => {
