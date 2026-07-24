@@ -16,6 +16,7 @@ from pathlib import Path
 
 from earpipe.services.ear import (
     apply_postfilter,
+    cleanup_upper_harmonics,
     bp_python_path,
     choose_engine,
     detect_events,
@@ -226,6 +227,9 @@ def transcribe_file(
                 }
             else:
                 events = detect_events_poly(in_path, sensitivity=sensitivity)
+            # #144: +19/24/28の弱い上方倍音は常時クリーンアップ(正解付き実曲で実測調律。
+            # +12はパワーコードのオクターブ構成音と分離不能のため触らない)
+            events = cleanup_upper_harmonics(events)
             if postfilter:
                 events = apply_postfilter(events)
         elif mono_events_cache is not None:

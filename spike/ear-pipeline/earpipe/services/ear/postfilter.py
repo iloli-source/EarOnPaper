@@ -98,6 +98,47 @@ def filter_harmonic_ghosts(
     return keep
 
 
+# #144実測(夢見る・正解付き): +19/+24/+28倍音幽霊のconf比は95%で0.75以下。
+# +12はパワーコードのオクターブ構成音と分離不能(実測で分布重なり)のため対象外。
+CLEANUP_INTERVALS = frozenset({19, 24, 28})
+CLEANUP_RATIO = 0.75
+CLEANUP_CONF_CAP = 0.3
+
+
+def cleanup_upper_harmonics(events: list[PitchEvent]) -> list[PitchEvent]:
+    """+19/+24/+28の弱い上方倍音だけを除去する軽量クリーンアップ(#144・常時ON用)。
+
+    条件: より低い音に重なり、confidence が基音の CLEANUP_RATIO 未満かつ
+    CLEANUP_CONF_CAP 未満。+12(オクターブ)は本物の構成音と分離不能のため触らない。
+    """
+    def ov(a: PitchEvent, b: PitchEvent) -> float:
+        return min(a.offset, b.offset) - max(a.onset, b.onset)
+
+    def valid_base(b: PitchEvent) -> bool:
+        # サブオクターブ疑いの音は基音として無効(#144実測バグ: C#2幽霊が
+        # +19の本物G#3を殺した)。+12上に同等信頼度の音があれば疑う。
+        return not any(
+            c.midi == b.midi + 12 and ov(b, c) > 0.05
+            and c.confidence >= 0.8 * b.confidence
+            for c in events
+            if c is not b
+        )
+
+    out = []
+    for e in events:
+        is_ghost = any(
+            e.midi - b.midi in CLEANUP_INTERVALS and ov(b, e) > 0.05
+            and e.confidence < CLEANUP_RATIO * b.confidence
+            and e.confidence < CLEANUP_CONF_CAP
+            and valid_base(b)
+            for b in events
+            if b is not e
+        )
+        if not is_ghost:
+            out.append(e)
+    return out
+
+
 def apply_postfilter(events: list[PitchEvent]) -> list[PitchEvent]:
     """#31の標準後処理: 分裂マージ → 倍音幽霊除去。
 

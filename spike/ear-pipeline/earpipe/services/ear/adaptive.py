@@ -23,8 +23,10 @@ from earpipe.contracts import PitchEvent
 
 from .poly import detect_events_poly
 
-# high/normal 検出数比がこの値以上なら「normalが取りこぼしている」と判定しhighを採用
-DENSITY_RATIO_THRESHOLD = 2.3
+# high/normal 検出数比がこの値以上なら「normalが取りこぼしている」と判定しhighを採用。
+# 2.3→2.2(#144): 正解付き実曲(夢見る・比2.26)がhighにしか無い和音最高音を取りこぼす
+# 一方、PD15の実測分離ギャップ(非rescue最大2.03 / rescue最小2.56)内のため選択不変。
+DENSITY_RATIO_THRESHOLD = 2.2
 
 # #137 密度ガード: high採用時の絶対密度(音/秒)がこれを超えたら幽霊の嵐と判定し
 # normalへ退避。両コーパスの実測(2026-07-24)で調律:
@@ -57,6 +59,34 @@ def _events_density(events: list[PitchEvent]) -> float:
     return len(events) / span
 
 
+def _octave_rescue(normal: list[PitchEvent], high: list[PitchEvent]) -> list[PitchEvent]:
+    """normal採用時、highからパワーコード文脈の+12補完だけを救済する(#144)。
+
+    正解付き実曲(夢見る)の実測: normalが取りこぼす和音最高音は全て検出済み
+    ルートの+12。無差別+12救済は倍音幽霊も拾いF1悪化(0.674)、+7(5度)が同時に
+    居る文脈限定なら precision を保って recall 改善(0.684→0.701)。音楽的に
+    普遍のオクターブ重ね補完であり楽器分岐ではない(NF-050)。
+    """
+    def ov(a: PitchEvent, b: PitchEvent) -> float:
+        return min(a.offset, b.offset) - max(a.onset, b.onset)
+
+    have = {(round(e.onset, 3), e.midi) for e in normal}
+    out = list(normal)
+    for h in high:
+        if (round(h.onset, 3), h.midi) in have:
+            continue
+        for root in normal:
+            if h.midi - root.midi != 12:
+                continue
+            dur = max(h.offset - h.onset, 1e-6)
+            if ov(root, h) / dur < 0.5:
+                continue
+            if any(f.midi - root.midi == 7 and ov(root, f) > 0.05 for f in normal):
+                out.append(h)
+                break
+    return sorted(out, key=lambda e: (e.onset, e.midi))
+
+
 def detect_events_adaptive(path: str | Path) -> AdaptiveSelection:
     """normal/high両感度で検出し、密度比で適応選択する。
 
@@ -74,7 +104,10 @@ def detect_events_adaptive(path: str | Path) -> AdaptiveSelection:
     if ratio >= DENSITY_RATIO_THRESHOLD:
         if _events_density(high) > GHOST_STORM_DENSITY:
             return AdaptiveSelection(
-                normal, "normal", ratio, len(normal), len(high), density_guard=True
+                _octave_rescue(normal, high), "normal", ratio,
+                len(normal), len(high), density_guard=True
             )
         return AdaptiveSelection(high, "high", ratio, len(normal), len(high))
-    return AdaptiveSelection(normal, "normal", ratio, len(normal), len(high))
+    return AdaptiveSelection(
+        _octave_rescue(normal, high), "normal", ratio, len(normal), len(high)
+    )

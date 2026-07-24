@@ -45,11 +45,14 @@ class TestAdaptiveSelection:
         assert len(sel.events) == 280
 
     def test_threshold_boundary(self, monkeypatch):
-        # 閾値ちょうど(23/10==2.3)はhigh側(≥判定)。直下はnormal
-        assert DENSITY_RATIO_THRESHOLD == 23 / 10
-        _patch_counts(monkeypatch, 10, 23)
-        assert detect_events_adaptive("d.wav").profile == "high"
+        # 閾値ちょうど(22/10==2.2)はhigh側(≥判定)。直下はnormal。
+        # #144実測: 正解付き実曲(夢見る)が比2.26で、highにしか無い和音最高音
+        # (C#4/A3/E4)を取りこぼしていた。PD15の実測ギャップ(rescue最小2.56/
+        # 非rescue最大2.03)の中なので2.2への引き下げはPD15の選択を変えない。
+        assert DENSITY_RATIO_THRESHOLD == 22 / 10
         _patch_counts(monkeypatch, 10, 22)
+        assert detect_events_adaptive("d.wav").profile == "high"
+        _patch_counts(monkeypatch, 10, 21)
         assert detect_events_adaptive("d.wav").profile == "normal"
 
     def test_normal_zero_high_nonzero_uses_high(self, monkeypatch):
@@ -122,6 +125,82 @@ class TestDensityGuard:
 
     def test_guard_threshold_constant(self):
         assert adaptive.GHOST_STORM_DENSITY == 14.0
+
+
+class TestPowerContextOctaveRescue:
+    """#144: normal採用時、highからパワーコード文脈(+7同時)の+12補完だけ救済。
+
+    正解付き実曲(夢見る)の実測: 欠けた和音最高音は全て検出済みルートの+12で、
+    無差別+12救済は倍音幽霊も拾いF1が下がる(0.674)が、+7(5度)が同時に居る
+    文脈限定なら precision を保って recall が上がる(0.684→0.701)。
+    """
+
+    def test_rescues_octave_over_power_chord(self, monkeypatch):
+        root = PitchEvent(onset=0.0, offset=1.0, midi=49, confidence=0.8)
+        fifth = PitchEvent(onset=0.0, offset=1.0, midi=56, confidence=0.7)
+        octave = PitchEvent(onset=0.0, offset=1.0, midi=61, confidence=0.3)
+
+        def fake(path, sensitivity="normal", **kw):
+            if sensitivity == "high":
+                return [root, fifth, octave,
+                        PitchEvent(onset=2.0, offset=2.4, midi=70, confidence=0.2)]  # 比2.0<2.2
+            return [root, fifth]
+
+        monkeypatch.setattr(adaptive, "detect_events_poly", fake)
+        sel = detect_events_adaptive("d.wav")
+        assert sel.profile == "normal"
+        assert any(e.midi == 61 for e in sel.events), "パワーコード文脈の+12が救済される"
+        assert not any(e.midi == 70 for e in sel.events), "文脈外のhigh音は入らない"
+
+    def test_no_rescue_without_fifth_context(self, monkeypatch):
+        root = PitchEvent(onset=0.0, offset=1.0, midi=49, confidence=0.8)
+        octave = PitchEvent(onset=0.0, offset=1.0, midi=61, confidence=0.3)
+
+        def fake(path, sensitivity="normal", **kw):
+            return [root, octave] if sensitivity == "high" else [root]
+
+        monkeypatch.setattr(adaptive, "detect_events_poly", fake)
+        sel = detect_events_adaptive("d.wav")
+        assert not any(e.midi == 61 for e in sel.events), "単音上の+12(倍音疑い)は救済しない"
+
+
+class TestHarmonicCleanup:
+    """#144: +19/+24/+28倍音の弱信頼度クリーンアップ(実測: 幽霊のconf比95%≤0.75)。"""
+
+    def test_weak_upper_harmonic_removed(self):
+        from earpipe.services.ear.postfilter import cleanup_upper_harmonics
+
+        base = PitchEvent(onset=0.0, offset=1.0, midi=45, confidence=0.8)
+        ghost = PitchEvent(onset=0.0, offset=0.9, midi=64, confidence=0.2)  # +19
+        out = cleanup_upper_harmonics([base, ghost])
+        assert ghost not in out and base in out
+
+    def test_strong_real_note_kept(self):
+        from earpipe.services.ear.postfilter import cleanup_upper_harmonics
+
+        base = PitchEvent(onset=0.0, offset=1.0, midi=45, confidence=0.5)
+        real = PitchEvent(onset=0.0, offset=1.0, midi=64, confidence=0.45)  # 比0.9>0.75
+        out = cleanup_upper_harmonics([base, real])
+        assert real in out
+
+    def test_suboctave_ghost_cannot_kill_real_fifth(self):
+        # #144実測バグの回帰固定: サブオクターブ幽霊(C#2)が基音扱いされ、
+        # +19の本物の5度(G#3)を殺していた。+12上に同等信頼度の音を持つ音は
+        # 基音として無効(サブオクターブ疑い)。
+        from earpipe.services.ear.postfilter import cleanup_upper_harmonics
+
+        ghost_sub = PitchEvent(0.0, 1.0, 37, 0.6)   # C#2(幽霊・強め)
+        root = PitchEvent(0.0, 1.0, 49, 0.55)       # C#3(本物)
+        fifth = PitchEvent(0.0, 1.0, 56, 0.2)       # G#3(本物・弱い)
+        out = cleanup_upper_harmonics([ghost_sub, root, fifth])
+        assert fifth in out, "本物の5度が幽霊基音に殺されてはいけない"
+
+    def test_power_chord_members_untouched(self):
+        from earpipe.services.ear.postfilter import cleanup_upper_harmonics
+
+        evs = [PitchEvent(0.0, 1.0, 49, 0.8), PitchEvent(0.0, 1.0, 56, 0.4),
+               PitchEvent(0.0, 1.0, 61, 0.3)]  # +7/+12は対象外
+        assert cleanup_upper_harmonics(evs) == evs
 
 
 class TestOnsetMatchingProcedure:

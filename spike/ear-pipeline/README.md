@@ -249,6 +249,12 @@ cd ../../tools/ai-ears
 ```
 
 結果は `usertest/output/yt-guitar/report.md`（クロマ一致・オンセット相関・bpm_source・警告一覧）。
+
+```bash
+# 正解付き実曲ベンチ(#144): 作曲者本人演奏を絶対正解とするnoteレベルF1(参照データはローカル専用)
+.venv/bin/python usertest/gt_bench_yume.py
+```
+
 譜面から合成した再生音 `render.wav` が各曲フォルダに残り、原音との聴き比べエビデンスになる。
 音源は gitignore 配下(`usertest/input/yt-guitar/`)に保存され、リポジトリには混入しない（私的テスト利用・F-006裁定と同方針）。
 
