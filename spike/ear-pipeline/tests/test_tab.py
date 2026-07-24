@@ -178,20 +178,76 @@ class TestIdiomaticVoicing:
         assert res["n_idiom_shapes"] >= 1
 
 
+class TestSpacingRods:
+    """#139: 簡易spring-rod＋密度適応段組(調査 tab-spacing-research.md)。
+
+    固定4小節/段＋純粋拍比例で16分連打の2桁フレットが癒着していた
+    (実曲最大77重なり/曲)。rod=数字幅+余白の最小間隔を保証し、
+    小節の必要幅に応じて段あたり小節数を1〜4で可変にする。
+    """
+
+    def test_flagship_dense_two_digit_16ths_no_overlap(self, tmp_path: Path):
+        # 141414型: 2桁フレットの16分連打2小節ぶん → 重なりゼロが採用条件
+        notes = [qn(i * 0.25, 0.25, 78 if i % 2 == 0 else 80) for i in range(32)]
+        res = write_tab_pdf(notes, 120.0, tmp_path / "dense.pdf")
+        assert res["n_overlaps"] == 0
+
+    def test_solve_anchors_enforces_rods(self):
+        from earpipe.services.notate.tab import _solve_anchors
+
+        # 0.25拍刻み×8音・数字幅40 → 隣接間隔は必ず rod(44) 以上
+        onsets = [(i * 0.25, 40.0) for i in range(8)]
+        anchors = _solve_anchors(onsets, width=300.0)
+        xs = [x for _, x in anchors]
+        assert all(x2 - x1 >= 43.99 for x1, x2 in zip(xs, xs[1:]))
+        assert xs == sorted(xs)
+
+    def test_solve_anchors_sparse_stays_proportional(self):
+        from earpipe.services.notate.tab import _solve_anchors, _nominal_inner_width
+
+        # 4分音符×4(疎) → 拍比例位置とほぼ一致(回帰ゼロの構造保証)
+        w = _nominal_inner_width()
+        onsets = [(float(b), 29.0) for b in range(4)]
+        anchors = _solve_anchors(onsets, width=w)
+        for (b, x) in anchors:
+            ideal = (b / 4.0) * w
+            assert abs(x - ideal) < w * 0.05
+
+    def test_pack_measures_density_adaptive(self):
+        from earpipe.services.notate.tab import _pack_measures
+
+        # 密な小節は段が分かれ、疎のみなら4小節/段
+        rows = _pack_measures([2000.0, 300.0, 300.0, 300.0], page_w=1840.0)
+        assert rows[0] == [0]
+        rows2 = _pack_measures([300.0] * 8, page_w=1840.0)
+        assert rows2 == [[0, 1, 2, 3], [4, 5, 6, 7]]
+        # 1小節でも収まらない場合は1小節段として正直に置く
+        rows3 = _pack_measures([3000.0], page_w=1840.0)
+        assert rows3 == [[0]]
+
+    def test_sparse_song_keeps_four_measures_per_system(self, tmp_path: Path):
+        # 疎な4分音符メロディ16拍(4小節) → 従来どおり1段4小節・重なり0
+        notes = [qn(float(i), 1.0, 60 + (i % 5)) for i in range(16)]
+        res = write_tab_pdf(notes, 120.0, tmp_path / "sparse.pdf")
+        assert res["n_overlaps"] == 0
+        assert res["pages"] == 1
+
+
 class TestCountOverlaps:
     def test_sparse_melody_no_overlap(self):
         # 1拍ずつ離れた単音列 → 重なりゼロ
         tabs = assign_frets([qn(i, 1, m) for i, m in enumerate([60, 62, 64, 65, 67])])
         assert count_overlaps(tabs) == 0
 
-    def test_dense_same_string_overlaps(self):
-        # 同一弦(1弦開放E4=64)に16分間隔で連続 → 数字が重なる
+    def test_dense_same_string_no_longer_overlaps(self):
+        # 同一弦の16分連続2桁: #139以前は重なりが出た入力。spring-rodレイアウト
+        # 導入後は rod(数字幅+余白) が保証されるため0になる(設計不変量の検証)。
         tabs = [
             TabNote(start_beats=i * 0.25, dur_beats=0.25, string_index=5,
                     fret=12, octave_shift=0, confidence=0.9)
             for i in range(8)
         ]
-        assert count_overlaps(tabs) > 0
+        assert count_overlaps(tabs) == 0
 
     def test_empty_no_overlap(self):
         assert count_overlaps([]) == 0
