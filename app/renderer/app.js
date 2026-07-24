@@ -459,8 +459,11 @@ function updateViewButtons() {
 
 function showInstrumentResult(result) {
   document.getElementById('stat-notes').textContent = result.n_notes ?? '—'
+  // #136: テンポの出所を正直表示(audio=音響フォールバック / default=推定不能で仮定値)
+  const bpmNote = result.bpm_source === 'audio' ? ' (音響推定)'
+    : result.bpm_source === 'default' ? ' (推定不能・仮定値)' : ''
   document.getElementById('stat-bpm').textContent =
-    result.bpm ? `${Math.round(result.bpm)} BPM` : '—'
+    result.bpm ? `${Math.round(result.bpm)} BPM${bpmNote}` : '—'
   document.getElementById('stat-engine').textContent = result.engine ?? '—'
 
   // 表示切替: コード譜(一次導線・#116)は常時、TAB はギターだけ。

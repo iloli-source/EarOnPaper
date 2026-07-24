@@ -58,10 +58,12 @@ from earpipe.services.rhythm import (
     BPM_DEFAULT,
     GRID_PER_BEAT,
     anchor_to_zero,
-    estimate_grid,
+    estimate_grid_ex,
     estimate_tempo_map,
     quantize_events,
 )
+from earpipe.services.rhythm.audio_tempo import estimate_audio_tempo
+from earpipe.services.rhythm.quantize import BPM_MAX, BPM_MIN
 from earpipe.services.stem import (
     MELODIC_STEMS,
     STEMS,
@@ -241,9 +243,25 @@ def transcribe_file(
         if analysis is not None:
             events = select_events(events, analysis.snr_db)
 
+        def _audio_fallback_bpm() -> float | None:
+            """IOI格子の完全破綻時のみ呼ばれる音響ベース推定(#136・遅延評価)。
+
+            失敗はNoneで既定値退避に委ね、フォールバック自体の例外で採譜を落とさない。
+            """
+            try:
+                y_fb, sr_fb = load_audio(in_path)
+                return estimate_audio_tempo(y_fb, sr_fb, BPM_MIN, BPM_MAX)
+            except Exception:
+                return None
+
         if events:
-            bpm, grid_per_beat = estimate_grid(events)  # 格子系(2分/3分)も同時推定(#39)
-            bpm = _apply_bpm_override(bpm, bpm_override, bpm_range)  # 任意上書き
+            est = estimate_grid_ex(  # 格子系(2分/3分)も同時推定(#39)・破綻時は音響へ(#136)
+                events, fallback_bpm=_audio_fallback_bpm
+            )
+            grid_per_beat = est.grid_per_beat
+            bpm = _apply_bpm_override(est.bpm, bpm_override, bpm_range)  # 任意上書き
+            # 出所の正直表示(#136): 上書き・範囲補正で推定値と変わった場合はoverride
+            bpm_source = est.source if bpm == est.bpm and bpm_override is None else "override"
             notes = quantize_events(
                 events, bpm, mono=(resolved_engine == "mono"), grid_per_beat=grid_per_beat
             )
@@ -252,6 +270,7 @@ def transcribe_file(
             notes, anchored_lead_beats = anchor_to_zero(notes)
         else:
             bpm = _apply_bpm_override(BPM_DEFAULT, bpm_override, bpm_range)
+            bpm_source = "default" if bpm == BPM_DEFAULT and bpm_override is None else "override"
             grid_per_beat = GRID_PER_BEAT
             notes = []
             anchored_lead_beats = 0.0
@@ -288,6 +307,7 @@ def transcribe_file(
             "n_events": len(events),
             "n_notes": len(notes),
             "bpm": bpm,
+            "bpm_source": bpm_source,  # #136: grid/audio/default/override の正直表示
             "grid_per_beat": grid_per_beat,
             # C2区間別テンポ系列(#56): 分析出力として先行提供。記譜は単一テンポ格子
             # (区間別格子での記譜は将来課題。tempo_map.py docstring参照)

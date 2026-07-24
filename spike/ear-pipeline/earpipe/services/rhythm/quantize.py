@@ -1,6 +1,8 @@
 """変換層: 音程イベント → テンポ推定・16分格子への量子化 → 音符列。"""
 
 import warnings
+from dataclasses import dataclass
+from typing import Callable
 
 import numpy as np
 
@@ -111,7 +113,19 @@ def estimate_tempo(
     bpm_min: float = BPM_MIN,
     bpm_max: float = BPM_MAX,
 ) -> float:
+    """従来シグネチャの公開API。実体は _estimate_tempo_ex(成否つき)に委譲(#136)。"""
+    return _estimate_tempo_ex(events, bpm_min, bpm_max)[0]
+
+
+def _estimate_tempo_ex(
+    events: list[PitchEvent],
+    bpm_min: float = BPM_MIN,
+    bpm_max: float = BPM_MAX,
+) -> tuple[float, bool]:
     """オンセット間隔(IOI)が16分格子に乗るテンポを、頑健化つきで推定する。
+
+    戻り値は (bpm, ok)。ok=False は格子で説明できず BPM_DEFAULT へ退避したことを
+    示す(#136: 呼び出し側が音響フォールバックへ切り替えるための成否シグナル)。
 
     旧実装の欠陥(Issue #34): 幽霊オンセット混入時に誤差が速いテンポほど単調に
     小さくなり、真のテンポと無関係に145-150帯へ固着。和音の非同時性で倍半誤りも発生。
@@ -133,13 +147,13 @@ def estimate_tempo(
     _validate_bpm_range(bpm_min, bpm_max)
     iois = _prep_iois(events)
     if iois is None:
-        return BPM_DEFAULT
+        return BPM_DEFAULT, False
 
     bpms = np.arange(bpm_min, bpm_max + 0.25, 0.5)
     fits = {float(b): _grid_fit(iois, float(b)) for b in bpms}
     best_fit = max(fits.values())
     if best_fit < MIN_FIT:
-        return BPM_DEFAULT  # 格子で説明できない(幽霊の嵐等)→固着せず退避
+        return BPM_DEFAULT, False  # 格子で説明できない(幽霊の嵐等)→固着せず退避
 
     med_ioi = float(np.median(iois))
     band = [b for b, f in fits.items() if f >= best_fit - FIT_BAND]
@@ -157,7 +171,7 @@ def estimate_tempo(
 
     chosen = max(band, key=total_score)
     _warn_if_slow_octave_ambiguous(iois, chosen, best_fit, bpm_min)
-    return chosen
+    return chosen, True
 
 
 def _prep_iois(events: list[PitchEvent]) -> np.ndarray | None:
@@ -215,12 +229,55 @@ def _best_system(
     return bpm, _system_total(iois, bpm, grid_per_beat, subdiv_centers)
 
 
+@dataclass(frozen=True)
+class GridEstimate:
+    """テンポ・格子系の推定結果と、その出所(#136: 正直表示用)。
+
+    source: "grid"=IOI格子フィット / "audio"=音響フォールバック /
+    "default"=推定不能でBPM_DEFAULTへ退避
+    """
+
+    bpm: float
+    grid_per_beat: int
+    source: str
+
+
+def _resolve_fallback(
+    fallback_bpm: "Callable[[], float | None] | None",
+) -> GridEstimate:
+    """格子推定の完全破綻時: 音響フォールバック→ダメなら既定値(従来動作)。"""
+    if fallback_bpm is not None:
+        try:
+            fb = fallback_bpm()
+        except Exception:
+            fb = None  # フォールバックの失敗で採譜を落とさない
+        if fb is not None and np.isfinite(fb) and fb > 0:
+            return GridEstimate(float(fb), GRID_PER_BEAT, "audio")
+    return GridEstimate(BPM_DEFAULT, GRID_PER_BEAT, "default")
+
+
 def estimate_grid(
     events: list[PitchEvent],
     bpm_min: float = BPM_MIN,
     bpm_max: float = BPM_MAX,
 ) -> tuple[float, int]:
+    """従来シグネチャの公開API。実体は estimate_grid_ex に委譲(#136)。"""
+    est = estimate_grid_ex(events, bpm_min, bpm_max)
+    return est.bpm, est.grid_per_beat
+
+
+def estimate_grid_ex(
+    events: list[PitchEvent],
+    bpm_min: float = BPM_MIN,
+    bpm_max: float = BPM_MAX,
+    fallback_bpm: "Callable[[], float | None] | None" = None,
+) -> GridEstimate:
     """テンポと格子系(2分系=4/3分系=3)を同時推定する(Issue #39)。
+
+    #136(二段推定): IOI格子で全く説明できない場合(イベント過疎、または
+    倍音の嵐で全候補が MIN_FIT 未満)のみ、fallback_bpm(遅延評価・通常は
+    音響ベース推定)を呼ぶ。フォールバック不能なら従来どおり BPM_DEFAULT。
+    出所は GridEstimate.source に正直に記録する。
 
     背景: 3連8分格子@T は 16分格子@1.5T と数学的に同一(エイリアシング)のため、
     格子系を固定したままでは三連符曲のテンポが1.5倍に化ける
@@ -237,26 +294,32 @@ def estimate_grid(
     _validate_bpm_range(bpm_min, bpm_max)
     iois = _prep_iois(events)
     if iois is None:
-        return BPM_DEFAULT, GRID_PER_BEAT
+        return _resolve_fallback(fallback_bpm)
 
     # 2分系: 調整済み estimate_tempo と 全BPMスキャン の良い方を代表にする。
     # 旧実装は estimate_tempo の単一値だけを再採点し、3分系だけ全スキャンで最良点を
     # 選ぶ非対称評価だった(テンポのオクターブ外しで2分系が過小評価→三連へ誤爆)。
     centers_d = (0.25, 0.5, 1.0)
-    bpm_e = estimate_tempo(events, bpm_min, bpm_max)
+    bpm_e, ok_e = _estimate_tempo_ex(events, bpm_min, bpm_max)
     total_e = _system_total(iois, bpm_e, GRID_PER_BEAT, centers_d)
     bpm_s, total_s = _best_system(iois, GRID_PER_BEAT, centers_d, bpm_min, bpm_max)
+    # 3分系: 同一ロジック(全スキャン)で評価
+    bpm_t, total_t = _best_system(
+        iois, TRIPLET_GRID_PER_BEAT, (1.0 / 3.0, 2.0 / 3.0, 1.0), bpm_min, bpm_max
+    )
+
+    # 完全破綻(#136): estimate_tempo が退避し、両系の全スキャンも候補なし
+    # → IOIは格子で全く説明できない(幽霊の嵐)。音響フォールバックへ。
+    if not ok_e and bpm_s is None and bpm_t is None:
+        return _resolve_fallback(fallback_bpm)
+
     if bpm_s is not None and total_s > total_e:
         bpm_d, total_d = bpm_s, total_s
     else:
         bpm_d, total_d = bpm_e, total_e
 
-    # 3分系: 同一ロジック(全スキャン)で評価
-    bpm_t, total_t = _best_system(
-        iois, TRIPLET_GRID_PER_BEAT, (1.0 / 3.0, 2.0 / 3.0, 1.0), bpm_min, bpm_max
-    )
     if bpm_t is None:  # 3分系は格子で説明できない → 2分系
-        return bpm_d, GRID_PER_BEAT
+        return GridEstimate(bpm_d, GRID_PER_BEAT, "grid")
 
     # 三連採用: オッカム減点つきで total_t が total_d を上回るとき(従来semantics)。
     # 履歴(2026-07-23): fit/evidence ベースの追加判別ゲートは試作したが、実音声では
@@ -265,8 +328,8 @@ def estimate_grid(
     # フィルタ(粗い格子ほどジッタでfitが高く出る非対称性で正解テンポを候補から除外)
     # であり、同日の #118/#124 修正で根治した(_best_system docstring 参照)。
     if TRIPLET_PENALTY * total_t > total_d:
-        return bpm_t, TRIPLET_GRID_PER_BEAT
-    return bpm_d, GRID_PER_BEAT
+        return GridEstimate(bpm_t, TRIPLET_GRID_PER_BEAT, "grid")
+    return GridEstimate(bpm_d, GRID_PER_BEAT, "grid")
 
 
 def quantize_events(

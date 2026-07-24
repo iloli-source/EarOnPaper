@@ -705,7 +705,8 @@ ipcMain.handle('transcribe-stem', async (event, inputPath, stemId, title = '', o
     return {
       stem: stemId, label: meta.label,
       n_notes: result.n_notes, engine: result.engine,
-      bpm: result.bpm, tuning_offset_cents: result.tuning_offset_cents,
+      bpm: result.bpm, bpm_source: result.bpm_source,
+      tuning_offset_cents: result.tuning_offset_cents,
       paths, pdfUrl, tabUrl, chordChartUrl, confViewUrl,
     }
   } catch (err) {
