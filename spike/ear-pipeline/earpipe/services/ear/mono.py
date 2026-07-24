@@ -20,9 +20,23 @@ PITCH_TOL_SEMITONES = 0.5  # セグメント中心からの許容偏差(ビブ�
 STEP_TOL_SEMITONES = 0.7   # フレーム間連続性の許容(深いビブラートの最急部≈0.66/フレームまで継続。
                            # pYINは音替わりも滑走するため、持続的シフトは事後分割で切る。#46)
 SPLIT_GAP_SEMITONES = 0.8  # 事後分割: 局所窓の中央値がこれ以上離れたら別音とみなす
-ONSET_SPLIT_DELTA = 0.2    # 反復同音分割: RMSフラックス最大値に対するピーク閾値の比(高い=強い再アタックのみ)
-_SPLIT_MIN_FRAMES = 3      # 事後分割の最小断片長(フレーム)
-_SPLIT_WINDOW_FRAMES = 7   # 局所中央値の窓(≈81ms。6Hzビブラートの半周期相当で振動を平均化)
+# 反復同音分割: RMSフラックス最大値に対するピーク閾値の比。#138のかえるのうた
+# スイープ実測: 0.06はn=29だが持続音の偽分割2件(GG/FF)、0.15は偽分割ゼロで
+# 編集距離同点 → 「ノイズを音符化しない」原則で0.15を採用(0.2から緩和)。
+# 残るレガート連打(CC/DD/EE級・エネルギー谷が浅い)はre-onset学習系の領域(#114)。
+# アタック相対の適応閾値も実験したが編集距離7〜16で明確に悪化し不採用(調査ノート)。
+ONSET_SPLIT_DELTA = 0.15
+# #138根治: 窓・最小断片長は秒で定義し実行時にsrから換算する。旧実装はフレーム数
+# 定数(22050Hz前提)で、ネイティブsr=48kHzでは実時間窓が半減(意図81ms→実37ms)し、
+# pYINの音替わり滑走(50〜100ms)が窓を覆って段差検出が失敗していた。
+SPLIT_MIN_SEC = 0.035      # 事後分割の最小断片長(≈35ms)
+SPLIT_WINDOW_SEC = 0.081   # 局所中央値の窓(≈81ms。6Hzビブラートの半周期相当で振動を平均化)
+POST_AVG_SEC = 0.058       # peak_pick後方平均窓(≈58ms)
+
+
+def _frames(sec: float, sr: int) -> int:
+    """秒→フレーム数(HOP格子)。22050Hzで従来のフレーム定数と一致する。"""
+    return max(3, round(sec * sr / HOP))
 
 
 
@@ -73,6 +87,8 @@ def detect_events(
     # スペクトルフラックスonsetはビブラート(ピッチ変動)を再アタックと誤認するため、
     # RMSエネルギーの正の増分(再アタック=エネルギー谷→山)で分割点を拾う。反復同音は
     # 音間でエネルギーが落ちて立ち上がる→ピーク、ビブラートは定常エネルギー→ピークなし。
+    min_frames = _frames(SPLIT_MIN_SEC, sr)
+    win_frames = _frames(SPLIT_WINDOW_SEC, sr)
     try:
         rms = librosa.feature.rms(y=y, hop_length=HOP, frame_length=FRAME)[0]
         flux = np.maximum(0.0, np.diff(rms, prepend=rms[:1]))
@@ -80,8 +96,9 @@ def detect_events(
         onset_frames = {
             int(fr)
             for fr in librosa.util.peak_pick(
-                flux, pre_max=3, post_max=3, pre_avg=3, post_avg=5,
-                delta=thr, wait=_SPLIT_MIN_FRAMES,
+                flux, pre_max=min_frames, post_max=min_frames, pre_avg=min_frames,
+                post_avg=_frames(POST_AVG_SEC, sr),
+                delta=thr, wait=min_frames,
             )
         }
     except Exception:
@@ -113,12 +130,12 @@ def detect_events(
         各境界が見つかる(全体の前半/後半比較では対称パターンを見逃すため)。
         """
         vals = midi_float[s:e]
-        if e - s < 2 * _SPLIT_MIN_FRAMES or float(np.max(vals) - np.min(vals)) < SPLIT_GAP_SEMITONES:
+        if e - s < 2 * min_frames or float(np.max(vals) - np.min(vals)) < SPLIT_GAP_SEMITONES:
             emit(s, e)
             return
-        w = _SPLIT_WINDOW_FRAMES
+        w = win_frames
         best_k, best_gap = -1, 0.0
-        for k in range(s + _SPLIT_MIN_FRAMES, e - _SPLIT_MIN_FRAMES + 1):
+        for k in range(s + min_frames, e - min_frames + 1):
             left = midi_float[max(s, k - w):k]
             right = midi_float[k:min(e, k + w)]
             gap = abs(float(np.median(left)) - float(np.median(right)))
@@ -134,10 +151,10 @@ def detect_events(
         nonlocal start
         assert start is not None
         # エネルギーonsetで反復同音を先に区切り、各断片内でピッチ変化分割する。
-        # 境界から _SPLIT_MIN_FRAMES 未満のonsetは無視(断片が短すぎる誤分割を避ける)。
+        # 境界から最小断片長未満のonsetは無視(断片が短すぎる誤分割を避ける)。
         cuts = [
             fr for fr in sorted(onset_frames)
-            if start + _SPLIT_MIN_FRAMES <= fr <= end_i - _SPLIT_MIN_FRAMES
+            if start + min_frames <= fr <= end_i - min_frames
         ]
         bounds = [start, *cuts, end_i]
         for a, b in zip(bounds, bounds[1:]):
