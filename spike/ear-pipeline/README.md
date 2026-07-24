@@ -235,6 +235,25 @@ cd ../../tools/ai-ears
 
 ---
 
+### 7.5 実曲スモーク（YouTubeギター10本・テスト時必須）
+
+合成データ(PD)が緑でも実曲では破綻し得る（#136: 歪みギターステムでテンポ推定が既定値退避）。
+テスト実施時は必ず実曲スモークを回し、**精度改善は生データのメトリクス改善で効果を証明してから採用する**（2026-07-24 運用ルール）。
+
+```bash
+# YouTubeギター10本 → 分離 → 採譜 → 譜面再生音を原音と突合（初回のみDL・以後キャッシュで回帰比較）
+.venv/bin/python usertest/yt_guitar_smoke.py
+
+# 疎通確認（1本だけ）
+.venv/bin/python usertest/yt_guitar_smoke.py --limit 1
+```
+
+結果は `usertest/output/yt-guitar/report.md`（クロマ一致・オンセット相関・bpm_source・警告一覧）。
+譜面から合成した再生音 `render.wav` が各曲フォルダに残り、原音との聴き比べエビデンスになる。
+音源は gitignore 配下(`usertest/input/yt-guitar/`)に保存され、リポジトリには混入しない（私的テスト利用・F-006裁定と同方針）。
+
+---
+
 ### 8. ディレクトリ構成
 
 ```
