@@ -133,6 +133,51 @@ class TestAssignFrets:
         assert total_move <= 6, f"ポジション移動が大きすぎ: centers={centers}"
 
 
+class TestIdiomaticVoicing:
+    """#142: 慣用ヴォイシング優先(DS-04東スポ氏指摘・調査 tab-fingering-idiom-research.md)。
+
+    音高は変えず、同じ音高集合の複数運指から慣用形(パワーコード/オクターブ/バレー)を
+    優先する。単音は非影響。
+    """
+
+    def _assign_map(self, midis: list[int]) -> dict[int, tuple[int, int]]:
+        tabs = assign_frets([qn(0.0, 1.0, m) for m in midis])
+        assert len(tabs) == len(midis)
+        return {TUNING_GUITAR[t.string_index] + t.fret: (t.string_index, t.fret)
+                for t in tabs}
+
+    def test_power_chord_triad_uses_classic_shape(self):
+        # G5 {G2,D3,G3}: 貪欲最低フレットだと分散配置になるが、
+        # 慣用形ボーナスで 6弦3F/5弦5F/4弦5F (3-5-5) を選ぶこと
+        played = self._assign_map([43, 50, 55])
+        assert played[43] == (0, 3)
+        assert played[50] == (1, 5)
+        assert played[55] == (2, 5)
+
+    def test_root_fifth_pair_lands_on_adjacent_strings(self):
+        # root+5th の2音は隣接弦ペアに載る(パワーコード形)
+        played = self._assign_map([45, 52])  # A2+E3
+        assert abs(played[45][0] - played[52][0]) == 1
+
+    def test_barre_run_prefers_same_fret(self):
+        # 1F横並び3音 {D#3,G#3,C4}: 4弦1F/3弦1F/2弦1F のバレー形
+        played = self._assign_map([51, 56, 60])
+        frets = {v[1] for v in played.values()}
+        assert frets == {1}
+        assert sorted(v[0] for v in played.values()) == [2, 3, 4]
+
+    def test_single_notes_unaffected(self):
+        # 単音メロディは列挙経路に入らず従来挙動(構造保証)
+        tabs = assign_frets([qn(0.0, 1.0, 64), qn(1.0, 1.0, 67), qn(2.0, 1.0, 69)])
+        assert all(0 <= t.fret <= MAX_FRET for t in tabs)
+        assert len(tabs) == 3
+
+    def test_idiom_shapes_reported(self, tmp_path: Path):
+        notes = [qn(0.0, 1.0, 43), qn(0.0, 1.0, 50), qn(0.0, 1.0, 55)]
+        res = write_tab_pdf(notes, 120.0, tmp_path / "t.pdf")
+        assert res["n_idiom_shapes"] >= 1
+
+
 class TestCountOverlaps:
     def test_sparse_melody_no_overlap(self):
         # 1拍ずつ離れた単音列 → 重なりゼロ

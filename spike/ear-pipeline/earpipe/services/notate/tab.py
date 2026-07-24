@@ -27,6 +27,14 @@ _MOVE_COST = 1.0     # ポジション移動1フレットあたり（主コス�
 _HEIGHT_COST = 0.05  # ハイポジション微ペナルティ（同コストなら低い方）
 _FRET_COST = 0.02    # 押弦フレット合計の微ペナルティ
 
+# #142 慣用ヴォイシングボーナス(DS-04東スポ氏指摘・docs/research/tab-fingering-idiom-research.md)。
+# 同じ音高集合の複数運指から、ギタリストが実際に使う形を優先する(音高は変えない)。
+# _MOVE_COST=1.0 に対し小さく保ち、ポジション慣性を壊さない(Tuohy&Potter 2005以来の定石)。
+_IDIOM_POWER = 0.35    # 隣接弦で+7半音 = root+5th(パワーコード形)
+_IDIOM_OCTAVE = 0.15   # 2弦スキップで+12半音(オクターブ形)
+_IDIOM_BARRE = 0.1     # 隣接弦の同一フレット(1F以上・バレー形)
+_ENUM_MAX_NOTES = 4    # 全列挙するグループサイズ上限(超過は従来の貪欲割当)
+
 _BEATS_PER_MEASURE = 4  # 現行エンジンは4/4固定（score.pyと同前提）
 
 
@@ -109,16 +117,56 @@ def _reduce_to_melody(notes: Sequence[QuantizedNote]) -> list[QuantizedNote]:
     return melody
 
 
+def _idiom_bonus(assign: Sequence[tuple[int, int]], midis: Sequence[int]) -> float:
+    """慣用形(パワーコード/オクターブ/バレー)への一致ボーナス(#142・純関数)。
+
+    弦番号昇順の全ペアについて: 隣接弦+7半音=パワーコード形 /
+    2弦スキップ+12半音=オクターブ形 / 隣接弦の同一フレット(1F以上)=バレー形。
+    """
+    items = sorted(zip(assign, midis), key=lambda x: x[0][0])
+    bonus = 0.0
+    for a in range(len(items)):
+        (si, fi), mi = items[a]
+        for b in range(a + 1, len(items)):
+            (sj, fj), mj = items[b]
+            if sj - si == 1 and mj - mi == 7:
+                bonus += _IDIOM_POWER
+            elif sj - si == 2 and mj - mi == 12:
+                bonus += _IDIOM_OCTAVE
+            elif sj - si == 1 and fi == fj and fi >= 1:
+                bonus += _IDIOM_BARRE
+    return bonus
+
+
 def _assign_group_at(midis: list[int], pos: int) -> list[tuple[int, int]] | None:
     """ポジションposで全音を割当てる。開放弦(f0)またはpos..pos+WINDOW内のみ許可。
 
-    候補が少ない音から貪欲に割当（同一弦の重複禁止）。不能ならNone。
+    2〜_ENUM_MAX_NOTES音は全組合せを列挙し、フレットコスト−慣用形ボーナス最小の
+    割当を選ぶ(#142: 貪欲最低フレットでは慣用形候補を生成できない)。
+    単音・上限超は従来の貪欲割当(候補が少ない音から・同一弦の重複禁止)。
     """
     def cands(m: int) -> list[tuple[int, int]]:
         return [
             (si, f) for si, f in _candidates(m)
             if f == 0 or pos <= f <= pos + _WINDOW
         ]
+
+    if 2 <= len(midis) <= _ENUM_MAX_NOTES:
+        from itertools import product
+
+        cand_lists = [cands(m) for m in midis]
+        if any(not c for c in cand_lists):
+            return None
+        best_combo = None
+        best_cost = float("inf")
+        for combo in product(*cand_lists):
+            if len({si for si, _ in combo}) != len(combo):
+                continue  # 同一弦の重複禁止
+            cost = (_FRET_COST * sum(f for _, f in combo)
+                    - _idiom_bonus(combo, midis))
+            if cost < best_cost:
+                best_combo, best_cost = combo, cost
+        return list(best_combo) if best_combo is not None else None
 
     order = sorted(range(len(midis)), key=lambda i: len(cands(midis[i])))
     used: set[int] = set()
@@ -169,8 +217,9 @@ def assign_frets(notes: Sequence[QuantizedNote]) -> list[TabNote]:
     dp: list[dict[int, float]] = [dict() for _ in range(n_groups)]
     back: list[dict[int, int]] = [dict() for _ in range(n_groups)]
 
-    def local_cost(p: int, assign: list[tuple[int, int]]) -> float:
-        return _HEIGHT_COST * p + _FRET_COST * sum(f for _, f in assign)
+    def local_cost(p: int, assign: list[tuple[int, int]], midis: list[int]) -> float:
+        return (_HEIGHT_COST * p + _FRET_COST * sum(f for _, f in assign)
+                - _idiom_bonus(assign, midis))
 
     for gi in range(n_groups):
         table = assigns[gi]
@@ -179,7 +228,7 @@ def assign_frets(notes: Sequence[QuantizedNote]) -> list[TabNote]:
             back[gi] = {p: p for p in dp[gi]}
             continue
         for p, a in table.items():
-            lc = local_cost(p, a)
+            lc = local_cost(p, a, prepared[gi][1])
             if gi == 0 or not dp[gi - 1]:
                 dp[gi][p] = lc
                 back[gi][p] = p
@@ -594,11 +643,22 @@ def write_tab_pdf(notes: Sequence[QuantizedNote], bpm: float,
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     with open(out_pdf, "wb") as f:
         writer.write(f)
+    # #142: 慣用形(パワーコード/オクターブ/バレー)が発動した同時発音グループ数
+    groups: dict[float, list[TabNote]] = {}
+    for t in tabs:
+        groups.setdefault(round(t.start_beats, 6), []).append(t)
+    n_idiom = sum(
+        1 for g in groups.values() if len(g) >= 2 and _idiom_bonus(
+            [(t.string_index, t.fret) for t in g],
+            [TUNING_GUITAR[t.string_index] + t.fret for t in g],
+        ) > 0
+    )
     return {
         "pages": len(svgs),
         "n_octave_shifted": n_shifted,
         "n_dropped": n_dropped,
         "n_notes_placed": len(tabs),
         "n_overlaps": count_overlaps(tabs),
+        "n_idiom_shapes": n_idiom,
         "n_chords": sum(1 for c in chord_spans if c.name != "N.C."),
     }
