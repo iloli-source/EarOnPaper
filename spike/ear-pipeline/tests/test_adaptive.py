@@ -66,6 +66,64 @@ class TestAdaptiveSelection:
         assert sel.events == []
 
 
+def _spread_events(n: int, dur_sec: float) -> list[PitchEvent]:
+    """n個のイベントを dur_sec に均等配置(密度 = n/dur_sec を制御)。"""
+    step = dur_sec / max(1, n)
+    return [
+        PitchEvent(onset=i * step, offset=i * step + step * 0.8,
+                   midi=60 + (i % 12), confidence=0.7)
+        for i in range(n)
+    ]
+
+
+class TestDensityGuard:
+    """#137: high採用が密度爆発(幽霊の嵐)したときだけnormalへ退避するガード。
+
+    実曲10本コーパスの実測(2026-07-24): highが16.1/15.2音/秒に爆発した2曲は
+    normalの方がクロマ一致・テンポ格子とも良好。一方PD15のrescue曲は
+    waltz 12.9音/秒までhigh維持が正解 → 閾値14.0音/秒で両コーパスを分離。
+    """
+
+    def _patch(self, monkeypatch, n_normal, n_high, dur_sec):
+        def fake(path, sensitivity="normal", **kw):
+            n = n_high if sensitivity == "high" else n_normal
+            return _spread_events(n, dur_sec)
+
+        monkeypatch.setattr(adaptive, "detect_events_poly", fake)
+
+    def test_storm_high_falls_back_to_normal(self, monkeypatch):
+        # acoustic_fingerstyle実測相当: 比2.64・high密度16.1/s → normalへ退避
+        self._patch(monkeypatch, 543, 1433, 89.0)
+        sel = detect_events_adaptive("d.wav")
+        assert sel.profile == "normal"
+        assert sel.density_guard is True
+        assert len(sel.events) == 543
+
+    def test_dense_but_sane_high_is_kept(self, monkeypatch):
+        # metal実測相当: 比3.0・high密度10.2/s(14未満) → high維持(ガード非発動)
+        self._patch(monkeypatch, 301, 915, 90.0)
+        sel = detect_events_adaptive("d.wav")
+        assert sel.profile == "high"
+        assert sel.density_guard is False
+        assert len(sel.events) == 915
+
+    def test_pd15_waltz_like_high_is_kept(self, monkeypatch):
+        # PD15 waltz実測相当: 比3.01・high密度12.9/s → high維持(誤退避の回帰固定)
+        self._patch(monkeypatch, 256, 771, 60.0)
+        sel = detect_events_adaptive("d.wav")
+        assert sel.profile == "high"
+        assert sel.density_guard is False
+
+    def test_normal_selection_never_sets_guard(self, monkeypatch):
+        self._patch(monkeypatch, 280, 420, 60.0)
+        sel = detect_events_adaptive("d.wav")
+        assert sel.profile == "normal"
+        assert sel.density_guard is False
+
+    def test_guard_threshold_constant(self):
+        assert adaptive.GHOST_STORM_DENSITY == 14.0
+
+
 class TestOnsetMatchingProcedure:
     """C1-2: オンセット±50ms窓のマッチ手順の固定(bench_pd.note_f1)。"""
 

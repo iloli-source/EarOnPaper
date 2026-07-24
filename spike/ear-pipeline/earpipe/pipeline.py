@@ -222,6 +222,7 @@ def transcribe_file(
                     "ratio": round(selection.ratio, 3) if selection.ratio != float("inf") else "inf",
                     "n_normal": selection.n_normal,
                     "n_high": selection.n_high,
+                    "density_guard": selection.density_guard,  # #137: 嵐退避の正直表示
                 }
             else:
                 events = detect_events_poly(in_path, sensitivity=sensitivity)
