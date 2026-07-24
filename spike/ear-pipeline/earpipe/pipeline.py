@@ -340,12 +340,16 @@ def transcribe_file(
             result["tab"] = write_tab_pdf(
                 notes, bpm, out_tab, title=title or Path(in_path_orig).stem,
                 chord_diagrams=chord_diagrams, monophonic=tab_monophonic,
+                beats_per_measure=beats_per_measure,  # #143: --beat上書き(Noneなら五線譜と同一推定)
+                grid_per_beat=grid_per_beat,
             )
         if out_tab_plain:
             # 押さえ図なし版（コードネームのみ）。ビューアのトグル用に同時生成
             result["tab_plain"] = write_tab_pdf(
                 notes, bpm, out_tab_plain, title=title or Path(in_path_orig).stem,
                 chord_diagrams=False,
+                beats_per_measure=beats_per_measure,
+                grid_per_beat=grid_per_beat,
             )
         if out_chordchart:
             # コード譜専用ビュー(#123): コードネーム＋押さえ図＋メロディ音名行。

@@ -233,6 +233,77 @@ class TestSpacingRods:
         assert res["pages"] == 1
 
 
+class TestRhythmNotationComplete:
+    """#143: 拍子表示・単独旗・タイ・三連括弧(調査 tab-rhythm-notation-research.md)。"""
+
+    def _render(self, notes: list[QuantizedNote], beats: int = 4, gpb: int = 4) -> str:
+        from earpipe.services.notate.tab import _render_pages
+
+        tabs = assign_frets(notes)
+        return " ".join(_render_pages(tabs, 120, "T", 0, 0, [], chord_diagrams=False,
+                                      beats_per_measure=beats, grid_per_beat=gpb))
+
+    def test_time_signature_is_drawn(self):
+        svg = self._render([qn(0.0, 1.0, 60)], beats=3)
+        assert svg.count('class="timesig"') == 2  # 分子と分母
+        assert ">3<" in svg  # 分子に3
+
+    def test_measures_split_by_beats(self):
+        from earpipe.services.notate.tab import _layout_rows
+
+        tabs = assign_frets([qn(0.0, 1.0, 60), qn(3.0, 1.0, 62)])
+        mls = [ml for row in _layout_rows(tabs, beats=3) for ml in row]
+        assert max(ml["m"] for ml in mls) == 1  # 3拍基準ならstart=3.0は第2小節
+
+    def test_write_tab_pdf_accepts_meter_override(self, tmp_path: Path):
+        notes = [qn(float(b), 1.0, 60) for b in range(6)]
+        res = write_tab_pdf(notes, 120.0, tmp_path / "m34.pdf", beats_per_measure=3)
+        assert res["pages"] >= 1
+        assert res["beats_per_measure"] == 3
+
+    def test_isolated_eighth_gets_flag(self):
+        svg = self._render([qn(0.0, 0.5, 60), qn(1.0, 1.0, 62)])
+        assert svg.count('class="flag"') == 1
+
+    def test_isolated_sixteenth_gets_two_flags(self):
+        svg = self._render([qn(0.0, 0.25, 60), qn(1.0, 1.0, 62)])
+        assert svg.count('class="flag"') == 2
+
+    def test_beamed_eighths_have_no_flags(self):
+        svg = self._render([qn(i * 0.5, 0.5, 60) for i in range(8)])
+        assert svg.count('class="flag"') == 0
+        assert svg.count('class="beam"') == 4
+
+    def test_cross_barline_tie_drawn_and_rests_fixed(self):
+        # 4/4で3拍目から2拍伸びる音 → 次小節頭に括弧数字+タイ弧・
+        # 次小節の占有区間(0-1拍)に休符を出さない(現行バグの回帰固定)
+        svg = self._render([qn(3.0, 2.0, 60)])
+        assert svg.count('class="tie"') == 1
+        assert svg.count('class="tie-digit"') == 1
+        # m0: 0-3拍空き(2分+4分) / m1: 1-4拍空き(4分+2分) = 計4個(全休符1個ではない)
+        assert svg.count('class="rest"') == 4
+
+    def test_triplet_brackets_only_on_triplet_grid(self):
+        third = 1.0 / 3.0
+        notes = [qn(i * third, third, 60) for i in range(6)]  # 2拍ぶんの8分3連
+        assert self._render(notes, gpb=3).count('class="tuplet3"') == 2
+        assert self._render(notes, gpb=4).count('class="tuplet3"') == 0
+
+    def test_tie_continuation_yields_to_same_string_new_note(self):
+        # 同弦で持続が次の音の開始と重なる場合、継続(n)は描かず新音を優先
+        # (同弦の持続は次の押弦で物理的に消える=記譜的にも正しい)。重なりゼロ。
+        notes = [qn(3.5, 1.0, 64), qn(4.0, 1.0, 64)]
+        tabs = assign_frets(notes)
+        assert count_overlaps(tabs) == 0
+        svg = self._render(notes)
+        assert svg.count('class="tie-digit"') == 0
+
+    def test_chord_band_fits_diagram(self):
+        from earpipe.services.notate.tab import _CHORD_BAND_H, _DIAGRAM_TOTAL_H
+
+        assert _CHORD_BAND_H >= _DIAGRAM_TOTAL_H + 6  # 図の下端がTAB上線に触れない
+
+
 class TestCountOverlaps:
     def test_sparse_melody_no_overlap(self):
         # 1拍ずつ離れた単音列 → 重なりゼロ
