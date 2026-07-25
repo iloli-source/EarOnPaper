@@ -17,10 +17,14 @@ import numpy as np
 
 from earpipe.contracts import PitchEvent
 
-# 裁定パラメータ(#144の正解付き実曲で調律)
+# 裁定パラメータ。多曲較正(2026-07-25): 夢見る単曲調律のsub=0.4はGuitar-TECHS
+# 4声和音で逆効果だった。パイプライン実測A/Bで sub=0.3 が全ベンチのパレート改善
+# (夢見る0.739→0.752 / G-TECHS DI 0.508→0.512 / mic 0.470→0.475)となり採用。
 MIN_HITS = 3          # クラスタリングに必要な同一ルートの最小ヒット数
 SPLIT_RATIO = 1.5     # 高/低クラスタ中心比がこれ以上なら「分離あり」とみなす
 FIFTH_OV_SEC = 0.05   # 5度(+7)の同時性判定の最小重なり秒
+SUB_OCTAVE_RATIO = 0.3   # f0がX+12帯のこの比未満ならサブオクターブ幽霊(旧0.4)
+DOWN_COMPLETE_RATIO = 0.8  # X-12帯がこの比以上なら下方実在として補完
 _CQT_BINS = 84        # C1..B7
 _CQT_FMIN_MIDI = 24   # C1
 
@@ -84,7 +88,7 @@ def arbitrate_octaves(events: list[PitchEvent], y: np.ndarray, sr: int) -> list[
     for e in list(out):
         if id(e) in removed:
             continue
-        if _energy(e.midi, e.onset, e.offset) < 0.4 * _energy(e.midi + 12, e.onset, e.offset):
+        if _energy(e.midi, e.onset, e.offset) < SUB_OCTAVE_RATIO * _energy(e.midi + 12, e.onset, e.offset):
             removed.add(id(e))
             if not any(x.midi == e.midi + 12 and ov(e, x) > 0.03 for x in out):
                 out.append(PitchEvent(onset=e.onset, offset=e.offset,
@@ -98,7 +102,7 @@ def arbitrate_octaves(events: list[PitchEvent], y: np.ndarray, sr: int) -> list[
             continue
         below = _energy(e.midi - 12, e.onset, e.offset)
         here = _energy(e.midi, e.onset, e.offset)
-        if below >= 0.8 * here and below > 0:
+        if below >= DOWN_COMPLETE_RATIO * here and below > 0:
             if not any(x.midi == e.midi - 12 and ov(e, x) > 0.03 for x in out):
                 out.append(PitchEvent(onset=e.onset, offset=e.offset,
                                       midi=e.midi - 12, confidence=e.confidence))
