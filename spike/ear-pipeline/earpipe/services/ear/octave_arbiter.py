@@ -27,6 +27,11 @@ SUB_OCTAVE_RATIO = 0.3   # f0がX+12帯のこの比未満ならサブオクタ�
 DOWN_COMPLETE_RATIO = 0.8  # X-12帯がこの比以上なら下方実在として補完
 SIBLING_BETA = 0.6       # 兄弟音補完: 典型エネルギーのこの比以上で欠けメンバー実在と判定
 SIBLING_MIN_TEMPLATE = 2  # テンプレ採用に必要な同一ピッチ集合の出現回数
+# クラスタ補完の絶対ゲート(#144 gt-muzyx実測 2026-07-26): 相対分離(SPLIT_RATIO)だけだと
+# 2声パワーコード曲で+12幽霊を量産(E3×10/A3×5)。highクラスタ中心が偶数優勢の絶対水準
+# (0.8)に届かない場合は+12実在の証拠なしとして補完しない。2正解ベンチのパレート点
+# (muzyx 0.756→0.830 / 夢見る0.767維持。1.0は夢見るのC#4補完を殺し0.748に退行)。
+CLUSTER_COMPLETE_MIN_EVEN = 0.8
 _CQT_BINS = 84        # C1..B7
 _CQT_FMIN_MIDI = 24   # C1
 
@@ -123,9 +128,10 @@ def arbitrate_octaves(events: list[PitchEvent], y: np.ndarray, sr: int) -> list[
         if not high or np.mean(high) / max(np.mean(low), 1e-9) < SPLIT_RATIO:
             continue  # 単峰=分離なし → 検出器を尊重
         thr = (max(low) + min(high)) / 2
+        can_complete = np.mean(high) >= CLUSTER_COMPLETE_MIN_EVEN  # 補完のみ絶対ゲート
         for h, ratio in zip(hits, ratios):
             oct_events = [e for e in events if e.midi == root_midi + 12 and ov(h, e) > 0.03]
-            if ratio > thr and not oct_events:
+            if ratio > thr and not oct_events and can_complete:
                 # 重ねあり判定なのに+12が無い → 補完(検出器の見落とし回復)
                 out.append(PitchEvent(
                     onset=h.onset, offset=h.offset, midi=root_midi + 12,
