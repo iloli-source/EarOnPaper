@@ -236,6 +236,14 @@ def transcribe_file(
             try:
                 y_arb, sr_arb = load_audio(in_path)
                 events = arbitrate_octaves(events, y_arb, sr_arb)
+                # #144 選択的抽出v1: adaptive経路では生事後確率が得られるため、
+                # 和音テンプレート多数決の欠けメンバーを事後確率ゲートで補完する
+                pp = getattr(selection, "posterior_path", None) if sensitivity == "auto" else None
+                if pp is not None:
+                    from earpipe.services.ear.octave_arbiter import complete_with_posterior
+
+                    events = complete_with_posterior(events, pp, len(y_arb) / sr_arb)
+                    Path(pp).unlink(missing_ok=True)
             except Exception:
                 pass  # 裁定の失敗で採譜を落とさない
             if postfilter:

@@ -130,3 +130,66 @@ def arbitrate_octaves(events: list[PitchEvent], y: np.ndarray, sr: int) -> list[
                     removed.add(id(e))  # 重ねなし判定の+12検出 → 幽霊として除去
     result = [e for e in out if id(e) not in removed]
     return sorted(result, key=lambda e: (e.onset, e.midi))
+
+
+# #144 選択的抽出v1: 和音テンプレート多数決 + 生事後確率ゲートの補完。
+# 同一ルートのヒット群で過半数出現するメンバーは「そのコードの形」— 個別ヒットで
+# 検出器が落としても、note/onset事後確率が床値以上残っていれば実在として補完する。
+# (実測: 欠けメンバーのnote事後確率0.10-0.21は閾値未満だがゼロではなく、
+#  onset headは0.2-0.43で発火している)
+TPL_MAJORITY = 0.5
+TPL_TAU_NOTE = 0.08
+TPL_TAU_ONSET = 0.08
+
+
+def complete_with_posterior(events: list[PitchEvent], posterior_path,
+                            total_dur: float) -> list[PitchEvent]:
+    """テンプレート多数決の欠けメンバーを事後確率ゲートで補完する(#144)。"""
+    try:
+        import numpy as _np
+
+        d = _np.load(str(posterior_path))
+        note_p, onset_p = d["note"], d["onset"]
+    except Exception:
+        return events
+    if note_p is None or note_p.ndim != 2 or total_dur <= 0:
+        return events
+    fps = note_p.shape[0] / total_dur
+
+    def post(midi: int, t0: float, t1: float, mat) -> float:
+        k = midi - 21
+        if not 0 <= k < mat.shape[1]:
+            return 0.0
+        i0 = int(t0 * fps)
+        i1 = max(i0 + 1, int(t1 * fps))
+        return float(mat[i0:i1, k].max()) if i1 <= mat.shape[0] else 0.0
+
+    evs = sorted(events, key=lambda e: e.onset)
+    clusters: list[list] = []
+    for e in evs:
+        if clusters and e.onset - clusters[-1][0] < 0.08:
+            clusters[-1][1].append(e)
+        else:
+            clusters.append([e.onset, [e]])
+    from collections import Counter
+
+    by_root: dict[int, list] = {}
+    for t0, mem in clusters:
+        by_root.setdefault(min(x.midi for x in mem), []).append((t0, mem))
+    out = list(events)
+    for root, hits in by_root.items():
+        if len(hits) < 3:
+            continue
+        cnt: Counter = Counter()
+        for _, mem in hits:
+            for m in {x.midi for x in mem}:
+                cnt[m] += 1
+        template = {m for m, n in cnt.items() if n / len(hits) >= TPL_MAJORITY}
+        for t0, mem in hits:
+            mset = {x.midi for x in mem}
+            t1 = min(max(x.offset for x in mem), t0 + 0.35)
+            for miss in template - mset:
+                if (post(miss, t0, t1, note_p) >= TPL_TAU_NOTE
+                        and post(miss, t0, t0 + 0.15, onset_p) >= TPL_TAU_ONSET):
+                    out.append(PitchEvent(t0, t1, miss, 0.35))
+    return sorted(out, key=lambda e: (e.onset, e.midi))

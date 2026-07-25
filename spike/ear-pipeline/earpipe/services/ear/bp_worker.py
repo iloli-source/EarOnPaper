@@ -4,8 +4,9 @@
 本体パッケージ(Python 3.14)からは subprocess 経由で呼ばれ、標準出力の JSON だけが契約。
 ライセンス: basic-pitch はコード・モデルとも Apache-2.0 (Spotify)。
 
-使い方: python bp_worker.py input.wav [onset_threshold frame_threshold]
+使い方: python bp_worker.py input.wav [onset_threshold frame_threshold [posterior.npz]]
   閾値は省略時 basic-pitch 既定(0.5 / 0.3)。低くすると弱音を拾う(#32 取りこぼし救済)。
+  第4引数を与えると生の事後確率(note/onset行列)をnpzで保存する(#144 証拠デコード用)。
 出力: [{"onset": s, "offset": s, "midi": int, "confidence": 0-1}, ...]
 """
 
@@ -13,6 +14,13 @@ import json
 import os
 import sys
 from pathlib import Path
+
+# #144: 決定性の確保。TFLite/BLASのマルチスレッド浮動小数点加算は実行毎に
+# 結果が揺れ、検出音数が±20%変動していた(同一音源3回で280/264/326音を実測)。
+# 正解付きベンチの再現性と製品の安定性のため、推論はシングルスレッドに固定する。
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("TF_NUM_INTRAOP_THREADS", "1")
+os.environ.setdefault("TF_NUM_INTEROP_THREADS", "1")
 
 
 def _install_net_guard() -> None:
@@ -71,12 +79,20 @@ def main() -> int:  # pragma: no cover (3.12側で実行されE2E/エラー系�
         tflite = model.parent / "nmp.tflite"
         if not tflite.exists():
             raise RuntimeError(f"nmp.tflite が見つかりません: {tflite}")
-        _, _, note_events = predict(
+        model_output, _, note_events = predict(
             str(wav),
             str(tflite),
             onset_threshold=onset_th,
             frame_threshold=frame_th,
         )
+        if len(sys.argv) > 4:
+            import numpy as np
+
+            np.savez_compressed(
+                sys.argv[4],
+                note=model_output.get("note"),
+                onset=model_output.get("onset"),
+            )
     finally:
         sys.stdout = real_stdout
 

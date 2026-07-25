@@ -61,6 +61,7 @@ def detect_events_poly(
     min_dur: float = MIN_DUR_SEC,
     min_conf: float | None = None,
     sensitivity: str = "normal",
+    dump_posterior: str | Path | None = None,
 ) -> list[PitchEvent]:
     """音声ファイルから多声の音程イベント列を抽出する。
 
@@ -81,8 +82,11 @@ def detect_events_poly(
             "basic-pitch 実行環境が見つかりません。"
             "tools/ai-ears/.venv312 を用意するか EARPIPE_BP_PYTHON を設定してください。"
         )
+    cmd = [py, str(_WORKER), str(path), str(onset_th), str(frame_th)]
+    if dump_posterior is not None:
+        cmd.append(str(dump_posterior))  # #144: 生事後確率(note/onset)をnpzへ
     proc = subprocess.run(
-        [py, str(_WORKER), str(path), str(onset_th), str(frame_th)],
+        cmd,
         capture_output=True,
         text=True,
         timeout=600,
