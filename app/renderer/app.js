@@ -530,6 +530,22 @@ document.getElementById('btn-export-analysis').addEventListener('click', async (
   await window.earpipe.saveFile(r.paths.confView, 'pdf', name)
 })
 
+// 詳細(音楽家向け)エクスポート(#129): 簡譜/リードシート/GP5/度数/Nashville
+const EXTRA_EXTS = { jianpu: 'txt', leadsheet: 'txt', gp5: 'gp5', roman: 'txt', nashville: 'txt' }
+document.querySelectorAll('#extra-export-buttons .btn-export-extra').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const key = btn.dataset.extra
+    if (!currentInput || !key) return
+    const name = window.earpipe.exportFileName(currentTitle, currentInstrument, key, EXTRA_EXTS[key] || 'txt')
+    btn.disabled = true
+    try {
+      await window.earpipe.exportExtra(currentInput, key, null, name)
+    } finally {
+      btn.disabled = false
+    }
+  })
+})
+
 document.getElementById('btn-export-midi').addEventListener('click', async () => {
   const r = currentResult()
   if (!r?.paths?.midi) return

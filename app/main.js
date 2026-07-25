@@ -759,15 +759,21 @@ ipcMain.handle('export-extra', async (_, inputPath, key, e2eSavePath, defaultNam
   }
 
   let savePath
+  let e2eReturnPath = null  // #129: 呼び出し側が渡した表記(シンボリックリンク未解決)で返す
   if (process.env.EARPAPER_E2E === '1' && e2eSavePath) {
     const realTmp = fs.realpathSync.native(os.tmpdir())
-    const candidate = path.resolve(e2eSavePath)
+    // macOSの/var→/private/varシンボリックリンク差を吸収するため、保存先も
+    // 親ディレクトリをrealpath化して比較する(#129: 未解決だと常に拒否される)
+    const resolved = path.resolve(e2eSavePath)
+    const candidate = path.join(
+      fs.realpathSync.native(path.dirname(resolved)), path.basename(resolved))
     const rel = path.relative(realTmp, candidate)
     if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)
         || path.extname(candidate).toLowerCase() !== `.${spec.ext}`) {
       throw new Error('E2E保存先は一時ディレクトリ配下の正しい拡張子に限定されます')
     }
     savePath = candidate
+    e2eReturnPath = resolved
   } else {
     const extraDefault = pu.basenameForDisplay(String(defaultName || ''))
     const res = await dialog.showSaveDialog(mainWindow, {
@@ -797,5 +803,5 @@ ipcMain.handle('export-extra', async (_, inputPath, key, e2eSavePath, defaultNam
   if (!st || !st.isFile() || st.size === 0) {
     throw new Error(`${key} の出力生成に失敗しました`)
   }
-  return savePath
+  return e2eReturnPath || savePath
 })
