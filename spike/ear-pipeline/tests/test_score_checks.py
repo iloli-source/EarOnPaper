@@ -230,3 +230,35 @@ class TestPDCorpusMeasureCount:
             if not res.measures_within_tol:
                 bad.append((slug, res.output_measures, exp))
         assert bad == [], f"正解拍子基準で±1を超えた曲: {bad}"
+
+
+class TestMeterGridDriftRobustness:
+    """#124根治: 量子化グリッドの累積ドリフトへの頑健性。
+
+    かえるのうた実測: 後半のオンセットが+0.25拍ドリフトし、旧±0.125の拍頭ゲートが
+    大量除外→残った偶然の3音が5/4周期を形成した。±0.3(8分裏0.5は依然除外)で
+    ドリフト音を拍強度に拾い、誤5/4が消えることを固定する。
+    """
+
+    def test_drifted_second_half_stays_four_four(self):
+        from earpipe.contracts import QuantizedNote
+        from earpipe.services.rhythm.meter import estimate_meter
+
+        notes = []
+        for b in range(14):  # 前半: 正グリッドの4分
+            notes.append(QuantizedNote(float(b), 1.0, 60 + (b % 5), 0.9))
+        for b in range(14, 30):  # 後半: +0.25拍ドリフト
+            notes.append(QuantizedNote(b + 0.25, 1.0, 60 + (b % 5), 0.9))
+        assert estimate_meter(notes) == 4
+
+    def test_offbeat_eighths_still_excluded(self):
+        from earpipe.contracts import QuantizedNote
+        from earpipe.services.rhythm.meter import estimate_meter
+
+        # 3/4の本物(小節頭に低音+長さ)。裏拍8分(x.5)は拍頭統計に入らない
+        notes = []
+        for bar in range(10):
+            notes.append(QuantizedNote(bar * 3.0, 1.5, 45, 0.9))
+            for k in (1.0, 1.5, 2.0, 2.5):
+                notes.append(QuantizedNote(bar * 3.0 + k, 0.5, 64, 0.9))
+        assert estimate_meter(notes) == 3

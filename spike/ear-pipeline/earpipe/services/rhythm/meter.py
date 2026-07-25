@@ -29,6 +29,10 @@ MIN_BEATS = 24
 BASS_MIDI = 55          # これ未満の音は低音(小節頭に置かれやすい)として加点
 BASS_BONUS = 1.0
 DUR_WEIGHT_CAP = 2.0    # 音価の重み上限(全音符が支配しないように)
+# 拍頭判定の許容(#124根治): 旧±0.125は量子化グリッドの累積ドリフト(かえるのうた実測
+# +0.25拍)でオンセットを大量除外し、残った偶然の3音が5/4周期を形成した。±0.3なら
+# ドリフト音を拍頭に拾いつつ8分裏(±0.5)は除外できる。
+ACCENT_TOL_BEATS = 0.3
 
 
 def _beat_strengths(notes: list[QuantizedNote]) -> np.ndarray:
@@ -38,7 +42,7 @@ def _beat_strengths(notes: list[QuantizedNote]) -> np.ndarray:
     for n in notes:
         b = int(n.start_beats)
         # 拍頭(±1/8拍)に立つオンセットのみアクセント候補として数える
-        if abs(n.start_beats - round(n.start_beats)) > 0.125:
+        if abs(n.start_beats - round(n.start_beats)) > ACCENT_TOL_BEATS:
             continue
         b = int(round(n.start_beats))
         if b >= end:
