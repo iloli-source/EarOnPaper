@@ -64,6 +64,13 @@ def render(pm: pretty_midi.PrettyMIDI, sec: float, dest: Path):
     sf.write(dest, audio / peak * 0.9, SR)
 
 
+# トリム整列の適用範囲(#117結論): _align が必要なのは transcribe_file 経由の
+# 評価のみ(パイプラインが先頭無音をトリムし時間軸がGTからずれるため)。
+# rhythm-configs/dual/adaptive の各サイトは生wavへ直接 detect_events_* を当てる
+# ためトリムが発生せず、時間軸は最初からGTと一致する(kojo実測: bp/raw 0.72で健全。
+# 壊れていた時代の0.05は transcribe_file サイトのみの症状だった)。
+
+
 def note_f1(gt: list, pred: list, tol: float) -> tuple[float, float, float]:
     used = set()
     tp = 0
