@@ -172,6 +172,20 @@ class TestIdiomaticVoicing:
         assert all(0 <= t.fret <= MAX_FRET for t in tabs)
         assert len(tabs) == 3
 
+    def test_chord_after_chord_keeps_classic_shape(self):
+        # #144運指較正: C#5の後のB5が「ポジション据え置きの混成ヴォイシング」
+        # (6弦7F+4弦4F+3弦4F等)にならず、古典パワーコード形(隣接3弦・root+7+12)
+        # を保つ。ポジション(2F帯/7F帯)は文脈依存の両解を許す(本人運指との
+        # 全曲一致は68/99で別途計測・正解データはgitignore配下)。
+        notes = ([qn(0.0, 1.0, m) for m in (49, 56, 61)]
+                 + [qn(1.0, 1.0, m) for m in (47, 54, 59)])
+        b5 = [t for t in assign_frets(notes) if t.start_beats == 1.0]
+        by_string = sorted(b5, key=lambda t: t.string_index)
+        s0, s1, s2 = (t.string_index for t in by_string)
+        assert (s1 - s0, s2 - s1) == (1, 1), "隣接3弦に載る"
+        m0, m1, m2 = (TUNING_GUITAR[t.string_index] + t.fret for t in by_string)
+        assert (m1 - m0, m2 - m0) == (7, 12), "root+5度+オクターブの古典形"
+
     def test_idiom_shapes_reported(self, tmp_path: Path):
         notes = [qn(0.0, 1.0, 43), qn(0.0, 1.0, 50), qn(0.0, 1.0, 55)]
         res = write_tab_pdf(notes, 120.0, tmp_path / "t.pdf")
