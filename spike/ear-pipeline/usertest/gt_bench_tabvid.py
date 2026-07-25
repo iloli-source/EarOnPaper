@@ -35,10 +35,26 @@ def main() -> int:
     ref = json.loads(ref_path.read_text())
     out_dir = USERTEST / "output" / args.name
     meta = out_dir / "transcribe.json"
+    src = audio
+    if ref.get("separate"):
+        # 伴奏つき動画: Demucs 6-stemのguitarを対象にする(キャッシュ・再分離しない)
+        stem_dir = out_dir / "stems"
+        hits = list(stem_dir.rglob("guitar.wav")) if stem_dir.exists() else []
+        if not hits:
+            stem_dir.mkdir(parents=True, exist_ok=True)
+            r0 = subprocess.run(
+                [str(VENV_PY), "-m", "earpipe.pipeline", "separate", str(audio),
+                 "--out-dir", str(stem_dir)],
+                capture_output=True, text=True, timeout=1800)
+            hits = list(stem_dir.rglob("guitar.wav"))
+            if r0.returncode != 0 or not hits:
+                print(f"[fail] 分離失敗: {r0.stderr[-200:]}")
+                return 1
+        src = hits[0]
     if not meta.exists() or args.force:
         out_dir.mkdir(parents=True, exist_ok=True)
         r = subprocess.run(
-            [str(VENV_PY), "-m", "earpipe.pipeline", "transcribe", str(audio),
+            [str(VENV_PY), "-m", "earpipe.pipeline", "transcribe", str(src),
              "-o", str(out_dir / "out.musicxml"), "--midi", str(out_dir / "out.mid"),
              "--tab", str(out_dir / "out_tab.pdf"), "--engine", "auto",
              "--title", args.name],
