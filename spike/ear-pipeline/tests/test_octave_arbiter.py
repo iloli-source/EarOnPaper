@@ -70,6 +70,35 @@ class TestOctaveArbitration:
         out = arbitrate_octaves(events, y, SR)
         assert [e.midi for e in out] == [e.midi for e in sorted(events, key=lambda e: (e.onset, e.midi))]
 
+    def test_sibling_completion_recovers_missing_member(self):
+        # #144: 同一和音テンプレが繰り返される中で、1打だけメンバー欠落
+        # (音源にはエネルギーが実在)なら補完される。
+        hits = [(0.5, 45, True), (1.5, 45, True), (2.5, 45, True), (3.5, 45, True)]
+        y = _chord_audio(hits, 4.5)
+        events = []
+        for k, (t0, r, _) in enumerate(hits):
+            events.append(_ev(t0, r))
+            events.append(_ev(t0, r + 7))
+            if k != 2:  # 3打目だけ+12を検出し損ねた想定
+                events.append(_ev(t0, r + 12))
+        out = arbitrate_octaves(events, y, SR)
+        octs = [e for e in out if e.midi == 57 and abs(e.onset - 2.5) < 0.1]
+        assert octs, "欠落メンバーが兄弟音の証拠で補完される"
+
+    def test_sibling_completion_skips_absent_member(self):
+        # 音源に+12が無い(2声のみ)打には補完しない(エネルギー比ゲート)
+        hits = [(0.5, 45, False), (1.5, 45, False), (2.5, 45, False), (3.5, 45, False)]
+        y = _chord_audio(hits, 4.5)
+        events = []
+        for k, (t0, r, _) in enumerate(hits):
+            events.append(_ev(t0, r))
+            events.append(_ev(t0, r + 7))
+            if k == 0:
+                events.append(_ev(t0, r + 12, conf=0.3))  # 1打目だけ幽霊+12
+        out = arbitrate_octaves(events, y, SR)
+        added = [e for e in out if e.midi == 57 and e.onset > 1.0]
+        assert not added, "実在しないメンバーは補完されない"
+
     def test_no_fifth_context_untouched(self):
         # 5度が無い(パワーコード文脈外)は裁定対象外
         y = _tone(49, 0.4, (1.0, 0.3)) 

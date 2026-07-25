@@ -25,6 +25,8 @@ SPLIT_RATIO = 1.5     # 高/低クラスタ中心比がこれ以上なら「分�
 FIFTH_OV_SEC = 0.05   # 5度(+7)の同時性判定の最小重なり秒
 SUB_OCTAVE_RATIO = 0.3   # f0がX+12帯のこの比未満ならサブオクターブ幽霊(旧0.4)
 DOWN_COMPLETE_RATIO = 0.8  # X-12帯がこの比以上なら下方実在として補完
+SIBLING_BETA = 0.6       # 兄弟音補完: 典型エネルギーのこの比以上で欠けメンバー実在と判定
+SIBLING_MIN_TEMPLATE = 2  # テンプレ採用に必要な同一ピッチ集合の出現回数
 _CQT_BINS = 84        # C1..B7
 _CQT_FMIN_MIDI = 24   # C1
 
@@ -132,68 +134,35 @@ def arbitrate_octaves(events: list[PitchEvent], y: np.ndarray, sr: int) -> list[
             elif ratio <= thr:
                 for e in oct_events:
                     removed.add(id(e))  # 重ねなし判定の+12検出 → 幽霊として除去
-    result = [e for e in out if id(e) not in removed]
-    return sorted(result, key=lambda e: (e.onset, e.midi))
+    # 兄弟音トリガーの和音メンバー補完(#144 2026-07-26): 同一テンプレ(頻出ピッチ集合)の
+    # 打で欠けたメンバーを、そのピッチの「検出済みヒットの典型CQTエネルギー」との比で
+    # 裁定して補完する。実測: 欠落メンバーの大半は兄弟音の時刻に典型比≈1.0で実在
+    # (検出器が落としているだけ)。比が低い打(2声版など)には足さない。
+    cur = sorted([e for e in out if id(e) not in removed], key=lambda e: (e.onset, e.midi))
+    from collections import Counter
 
-
-# #144 選択的抽出v1: 和音テンプレート多数決 + 生事後確率ゲートの補完。
-# 同一ルートのヒット群で過半数出現するメンバーは「そのコードの形」— 個別ヒットで
-# 検出器が落としても、note/onset事後確率が床値以上残っていれば実在として補完する。
-# (実測: 欠けメンバーのnote事後確率0.10-0.21は閾値未満だがゼロではなく、
-#  onset headは0.2-0.43で発火している)
-TPL_MAJORITY = 0.5
-TPL_TAU_NOTE = 0.08
-TPL_TAU_ONSET = 0.08
-
-
-def complete_with_posterior(events: list[PitchEvent], posterior_path,
-                            total_dur: float) -> list[PitchEvent]:
-    """テンプレート多数決の欠けメンバーを事後確率ゲートで補完する(#144)。"""
-    try:
-        import numpy as _np
-
-        d = _np.load(str(posterior_path))
-        note_p, onset_p = d["note"], d["onset"]
-    except Exception:
-        return events
-    if note_p is None or note_p.ndim != 2 or total_dur <= 0:
-        return events
-    fps = note_p.shape[0] / total_dur
-
-    def post(midi: int, t0: float, t1: float, mat) -> float:
-        k = midi - 21
-        if not 0 <= k < mat.shape[1]:
-            return 0.0
-        i0 = int(t0 * fps)
-        i1 = max(i0 + 1, int(t1 * fps))
-        return float(mat[i0:i1, k].max()) if i1 <= mat.shape[0] else 0.0
-
-    evs = sorted(events, key=lambda e: e.onset)
     clusters: list[list] = []
-    for e in evs:
+    for e in cur:
         if clusters and e.onset - clusters[-1][0] < 0.08:
             clusters[-1][1].append(e)
         else:
             clusters.append([e.onset, [e]])
-    from collections import Counter
-
-    by_root: dict[int, list] = {}
+    sets = Counter(frozenset(x.midi for x in c[1]) for c in clusters if len(c[1]) >= 2)
+    vocab = [set(fs) for fs, n in sets.items() if n >= SIBLING_MIN_TEMPLATE]
+    typ: dict[int, list[float]] = {}
     for t0, mem in clusters:
-        by_root.setdefault(min(x.midi for x in mem), []).append((t0, mem))
-    out = list(events)
-    for root, hits in by_root.items():
-        if len(hits) < 3:
+        for x in mem:
+            typ.setdefault(x.midi, []).append(_energy(x.midi, t0, t0 + 0.3))
+    typm = {k: float(np.median(v)) for k, v in typ.items()}
+    for t0, mem in clusters:
+        mset = {x.midi for x in mem}
+        t1 = min(max(x.offset for x in mem), t0 + 0.35)
+        cands = [V for V in vocab if mset & V and mset <= V and len(V - mset) <= 2]
+        if not cands:
             continue
-        cnt: Counter = Counter()
-        for _, mem in hits:
-            for m in {x.midi for x in mem}:
-                cnt[m] += 1
-        template = {m for m, n in cnt.items() if n / len(hits) >= TPL_MAJORITY}
-        for t0, mem in hits:
-            mset = {x.midi for x in mem}
-            t1 = min(max(x.offset for x in mem), t0 + 0.35)
-            for miss in template - mset:
-                if (post(miss, t0, t1, note_p) >= TPL_TAU_NOTE
-                        and post(miss, t0, t0 + 0.15, onset_p) >= TPL_TAU_ONSET):
-                    out.append(PitchEvent(t0, t1, miss, 0.35))
-    return sorted(out, key=lambda e: (e.onset, e.midi))
+        V = min(cands, key=lambda v: len(v - mset))
+        for miss in V - mset:
+            e_typ = typm.get(miss, 0.0)
+            if e_typ > 0 and _energy(miss, t0, t0 + 0.3) >= SIBLING_BETA * e_typ:
+                cur.append(PitchEvent(onset=t0, offset=t1, midi=miss, confidence=0.4))
+    return sorted(cur, key=lambda e: (e.onset, e.midi))

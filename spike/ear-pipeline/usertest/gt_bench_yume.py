@@ -106,7 +106,9 @@ def transcribe(clip: Path, variant: str, force: bool) -> dict | None:
     tdir.mkdir(parents=True, exist_ok=True)
     src = clip
     if variant == "guitar":
-        g = _guitar_stem(clip, force)
+        # 分離は常にキャッシュ(Demucsはマルチスレッドで非決定のため、--forceでも
+        # 再分離しない=ベンチ素材を固定して採譜側だけを比較する)
+        g = _guitar_stem(clip, False)
         if g is None:
             return None
         src = g

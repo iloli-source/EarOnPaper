@@ -4,6 +4,16 @@
 完全ローカル処理(外部送信なし)。
 """
 
+import os
+
+# #144 決定性(2026-07-26): BLAS/FFTのマルチスレッド浮動小数点加算で CQT/pYIN の
+# 結果が実行毎に微妙に揺れ、三連/二分系の境界(80⇔105BPM)で増幅されて採譜全体が
+# 変わっていた(bp_worker単体は決定化済みでも本体プロセスが残っていた)。
+# 重い数値ライブラリのimport前にシングルスレッドへ固定する。
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+           "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_v, "1")
+
 import argparse
 import json
 import math
@@ -236,16 +246,11 @@ def transcribe_file(
             try:
                 y_arb, sr_arb = load_audio(in_path)
                 events = arbitrate_octaves(events, y_arb, sr_arb)
-                # #144 選択的抽出v1: adaptive経路では生事後確率が得られるため、
-                # 和音テンプレート多数決の欠けメンバーを事後確率ゲートで補完する
-                pp = getattr(selection, "posterior_path", None) if sensitivity == "auto" else None
-                if pp is not None:
-                    from earpipe.services.ear.octave_arbiter import complete_with_posterior
-
-                    events = complete_with_posterior(events, pp, len(y_arb) / sr_arb)
-                    Path(pp).unlink(missing_ok=True)
             except Exception:
                 pass  # 裁定の失敗で採譜を落とさない
+            # 履歴(#144): posterior(生事後確率)によるテンプレ補完はA/Bで下位互換と実測
+            # (兄弟音CQT補完あり時 F1 0.618 vs OFF 0.808)のため撤去。CQT相対証拠の方が
+            # note事後確率(欠落メンバーで0.1前後に沈む)より判別力が高い。
             if postfilter:
                 events = apply_postfilter(events)
         elif mono_events_cache is not None:

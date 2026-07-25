@@ -47,7 +47,6 @@ class AdaptiveSelection:
     n_normal: int
     n_high: int
     density_guard: bool = False  # #137: highが密度爆発しnormalへ退避したか
-    posterior_path: object = None  # #144: normal検出時の生事後確率npz(選択デコーダ用・一時ファイル)
 
 
 def _events_density(events: list[PitchEvent]) -> float:
@@ -67,25 +66,17 @@ def detect_events_adaptive(path: str | Path) -> AdaptiveSelection:
     - 両方ゼロは normal 扱いの空選択(無音・ノイズのみ入力で音符ゼロを維持)
     - high採用でも絶対密度が GHOST_STORM_DENSITY 超なら normal へ退避(#137)
     """
-    import tempfile
-    from pathlib import Path as _P
-
-    post_path = _P(tempfile.mkstemp(suffix=".npz", prefix="earpipe_post_")[1])
-    try:
-        normal = detect_events_poly(path, sensitivity="normal", dump_posterior=post_path)
-    except TypeError:  # テストのモックは旧シグネチャのことがある
-        normal = detect_events_poly(path, sensitivity="normal")
+    normal = detect_events_poly(path, sensitivity="normal")
     high = detect_events_poly(path, sensitivity="high")
     if not normal:
         if high:
-            return AdaptiveSelection(high, "high", float("inf"), 0, len(high), posterior_path=post_path)
-        return AdaptiveSelection([], "normal", 0.0, 0, 0, posterior_path=post_path)
+            return AdaptiveSelection(high, "high", float("inf"), 0, len(high))
+        return AdaptiveSelection([], "normal", 0.0, 0, 0)
     ratio = len(high) / len(normal)
     if ratio >= DENSITY_RATIO_THRESHOLD:
         if _events_density(high) > GHOST_STORM_DENSITY:
             return AdaptiveSelection(
-                normal, "normal", ratio, len(normal), len(high), density_guard=True,
-                posterior_path=post_path,
+                normal, "normal", ratio, len(normal), len(high), density_guard=True
             )
-        return AdaptiveSelection(high, "high", ratio, len(normal), len(high), posterior_path=post_path)
-    return AdaptiveSelection(normal, "normal", ratio, len(normal), len(high), posterior_path=post_path)
+        return AdaptiveSelection(high, "high", ratio, len(normal), len(high))
+    return AdaptiveSelection(normal, "normal", ratio, len(normal), len(high))
