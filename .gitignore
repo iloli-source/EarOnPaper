@@ -21,3 +21,4 @@ tools/ai-ears/.coverage
 
 # workflowオーケストレーション用スクラッチ(絶対パス埋込・一回限り・非トラック)
 spike/ear-pipeline/.workflow-*.js
+spike/ear-pipeline/.mt3_checkpoints/
