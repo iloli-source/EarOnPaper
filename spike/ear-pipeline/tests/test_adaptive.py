@@ -127,43 +127,9 @@ class TestDensityGuard:
         assert adaptive.GHOST_STORM_DENSITY == 14.0
 
 
-class TestPowerContextOctaveRescue:
-    """#144: normal採用時、highからパワーコード文脈(+7同時)の+12補完だけ救済。
-
-    正解付き実曲(夢見る)の実測: 欠けた和音最高音は全て検出済みルートの+12で、
-    無差別+12救済は倍音幽霊も拾いF1が下がる(0.674)が、+7(5度)が同時に居る
-    文脈限定なら precision を保って recall が上がる(0.684→0.701)。
-    """
-
-    def test_rescues_octave_over_power_chord(self, monkeypatch):
-        root = PitchEvent(onset=0.0, offset=1.0, midi=49, confidence=0.8)
-        fifth = PitchEvent(onset=0.0, offset=1.0, midi=56, confidence=0.7)
-        octave = PitchEvent(onset=0.0, offset=1.0, midi=61, confidence=0.3)
-
-        def fake(path, sensitivity="normal", **kw):
-            if sensitivity == "high":
-                return [root, fifth, octave,
-                        PitchEvent(onset=2.0, offset=2.4, midi=70, confidence=0.2)]  # 比2.0<2.2
-            return [root, fifth]
-
-        monkeypatch.setattr(adaptive, "detect_events_poly", fake)
-        sel = detect_events_adaptive("d.wav")
-        assert sel.profile == "normal"
-        assert any(e.midi == 61 for e in sel.events), "パワーコード文脈の+12が救済される"
-        assert not any(e.midi == 70 for e in sel.events), "文脈外のhigh音は入らない"
-
-    def test_no_rescue_without_fifth_context(self, monkeypatch):
-        root = PitchEvent(onset=0.0, offset=1.0, midi=49, confidence=0.8)
-        octave = PitchEvent(onset=0.0, offset=1.0, midi=61, confidence=0.3)
-
-        def fake(path, sensitivity="normal", **kw):
-            return [root, octave] if sensitivity == "high" else [root]
-
-        monkeypatch.setattr(adaptive, "detect_events_poly", fake)
-        sel = detect_events_adaptive("d.wav")
-        assert not any(e.midi == 61 for e in sel.events), "単音上の+12(倍音疑い)は救済しない"
-
-
+# (履歴 #144) 文脈のみのオクターブ救済(TestPowerContextOctaveRescue)は、
+# 証拠ベースの octave_arbiter(偶数倍音比)が上位互換のため撤去。
+# 文脈だけの+12追加はオクターブ重ねの無い和音に幽霊を足すことが正解付き実曲で実測された。
 class TestHarmonicCleanup:
     """#144: +19/+24/+28倍音の弱信頼度クリーンアップ(実測: 幽霊のconf比95%≤0.75)。"""
 

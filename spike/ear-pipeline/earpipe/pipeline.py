@@ -16,6 +16,7 @@ from pathlib import Path
 
 from earpipe.services.ear import (
     apply_postfilter,
+    arbitrate_octaves,
     cleanup_upper_harmonics,
     bp_python_path,
     choose_engine,
@@ -230,6 +231,13 @@ def transcribe_file(
             # #144: +19/24/28の弱い上方倍音は常時クリーンアップ(正解付き実曲で実測調律。
             # +12はパワーコードのオクターブ構成音と分離不能のため触らない)
             events = cleanup_upper_harmonics(events)
+            # #144: オクターブ構成音の裁定 — 偶数倍音比の物理的証拠で+12の
+            # 見落とし補完と幽霊除去を行う(分離不明瞭なら何もしない)
+            try:
+                y_arb, sr_arb = load_audio(in_path)
+                events = arbitrate_octaves(events, y_arb, sr_arb)
+            except Exception:
+                pass  # 裁定の失敗で採譜を落とさない
             if postfilter:
                 events = apply_postfilter(events)
         elif mono_events_cache is not None:
