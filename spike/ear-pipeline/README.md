@@ -255,6 +255,17 @@ cd ../../tools/ai-ears
 .venv/bin/python usertest/gt_bench_yume.py
 ```
 
+検出モデル比較R&D(#145)用に `mt3-infer` を別venvで併設できる（要 `brew install git-lfs`）:
+
+```bash
+python3.12 -m venv .venv-mt3 && .venv-mt3/bin/pip install mt3-infer
+.venv-mt3/bin/mt3-infer transcribe -m mr_mt3 入力.wav -o 出力.mid   # MR-MT3(MIT・比較実測でrecall 0.95)
+```
+
+比較実測(2026-07-25・夢見るベンチ): MR-MT3はrecall 0.953だがprecision 0.42(F1 0.59)、
+basic-pitch+証拠スタック(本体)がF1 0.74-0.76で最良。MT3-PyTorchは本素材で機能せず(F1 0.16)、
+YourMT3はmt3-infer 0.2.0で実行不能。詳細: docs/research/amt-model-successors-research.md
+
 譜面から合成した再生音 `render.wav` が各曲フォルダに残り、原音との聴き比べエビデンスになる。
 音源は gitignore 配下(`usertest/input/yt-guitar/`)に保存され、リポジトリには混入しない（私的テスト利用・F-006裁定と同方針）。
 

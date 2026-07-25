@@ -10,6 +10,7 @@ tools/ai-ears/tests/__pycache__/
 docs/**/.*.log
 spike/ear-pipeline/.venv/
 spike/ear-pipeline/.venv-demucs/
+spike/ear-pipeline/.venv-mt3/
 **/__pycache__/
 spike/ear-pipeline/usertest/input/
 spike/ear-pipeline/usertest/output/
