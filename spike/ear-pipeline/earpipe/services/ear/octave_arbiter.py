@@ -46,6 +46,17 @@ _CQT_FMIN_MIDI = 24   # C1
 FIFTH_F0_RATIO = 0.40    # E(+7) ≥ この比 × E(root f0) (5度の基音1.5f0=非重複)
 FIFTH_P3_RATIO = 0.10    # E(+26) ≥ この比 × E(root f0) (5度の第3倍音4.5f0=非重複)
 FIFTH_CTRL_MARGIN = 1.4   # E(+7) が隣接ビン(±1半音)の最大よりこの倍数以上
+# 下方ルート補完: 検出音Xが5度で、下のルートR=X-7が落ちているケース。
+# Rのf0(X-7)とRの第2倍音(X+5)はどちらもXの倍音系列(+12,+19,+24...)と重ならない。
+# 較正(2026-07-26): 3ベンチ下方候補218件の正解ラベル合同掃引の最適点。
+# 上方(0.40/1.4)より緩いのは、ルートが5度より強く弾かれ偽陽性余地が小さいため
+# (掃引でFP=0のまま: 夢見る+5/muzyx+2/octave±0)
+ROOT_F0_RATIO = 0.25     # E(X-7) ≥ この比 × E(X)
+ROOT_H2_RATIO = 0.10     # E(X+5) ≥ この比 × E(X) (ルートの第2倍音=非重複)
+ROOT_CTRL_MARGIN = 1.1    # E(X-7) が隣接ビン最大よりこの倍数以上
+# 運用点の選定(2026-07-26実走3点比較): 1.4=夢見る0.786/縦0.815・muzyx0.832 /
+# 1.1=夢見る0.788/縦0.852・muzyx0.828 / 1.2=両損(0.786/0.815・0.828)。
+# 要件ゲート(縦積み再現率)を優先し1.1を採用(muzyx縦積みは0.735で不変)
 
 
 def complete_fifths(events: list[PitchEvent], y: np.ndarray, sr: int) -> list[PitchEvent]:
@@ -96,6 +107,29 @@ def complete_fifths(events: list[PitchEvent], y: np.ndarray, sr: int) -> list[Pi
                 and e_p3 >= FIFTH_P3_RATIO * e_root
                 and e_f > FIFTH_CTRL_MARGIN * ctrl):
             out.append(PitchEvent(onset=r.onset, offset=r.offset, midi=r.midi + 7,
+                                  confidence=round(r.confidence * 0.5, 4)))
+
+    # 下方ルート補完: 検出音Xの-7半音(=Xを5度とするルート)を同じ非重複倍音論理で裁定
+    for r in events:
+        if any(x.midi == r.midi - 7 and ov(x, r.onset, r.offset) > 0.03 for x in out):
+            continue
+        e_x = e(r.midi, r.onset, r.offset)
+        if e_x <= 0:
+            continue
+        e_rf = e(r.midi - 7, r.onset, r.offset)
+        e_h2 = e(r.midi + 5, r.onset, r.offset)
+        ctrl = max(e(r.midi - 6, r.onset, r.offset), e(r.midi - 8, r.onset, r.offset))
+        _log = os.environ.get("EARPIPE_FIFTH_LOG")
+        if _log:
+            import json as _json
+            with open(_log, "a") as f:
+                f.write(_json.dumps({"dir": "down", "midi": r.midi, "onset": round(r.onset, 3),
+                                     "rf": round(e_rf / e_x, 4), "r3": round(e_h2 / e_x, 4),
+                                     "rc": round(e_rf / max(ctrl, 1e-9), 4)}) + "\n")
+        if (e_rf >= ROOT_F0_RATIO * e_x
+                and e_h2 >= ROOT_H2_RATIO * e_x
+                and e_rf > ROOT_CTRL_MARGIN * ctrl):
+            out.append(PitchEvent(onset=r.onset, offset=r.offset, midi=r.midi - 7,
                                   confidence=round(r.confidence * 0.5, 4)))
     return sorted(out, key=lambda x: (x.onset, x.midi))
 

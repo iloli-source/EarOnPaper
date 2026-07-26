@@ -80,3 +80,30 @@ class TestFifthCompletion:
 
     def test_empty_events_passthrough(self):
         assert complete_fifths([], np.zeros(SR), SR) == []
+
+
+class TestRootBelowCompletion:
+    def test_recovers_missing_root_below_detected_fifth(self):
+        # 音はパワーコード(ルート42+5度49)だが検出器は5度(49)しか出していない
+        # → 49の下7半音に、49の倍音では説明できない独立エネルギー(f0=42, 2f0=54)
+        hits = [(t, [(42, ROOT_H), (49, FIFTH_H)]) for t in (0.5, 1.5, 2.5)]
+        y = _mix(hits, 3.5)
+        events = [_ev(t, 49) for t in (0.5, 1.5, 2.5)]
+        out = complete_fifths(events, y, SR)
+        added = [e for e in out if e.midi == 42]
+        assert len(added) == 3, f"全打で下方ルートが補完される: {len(added)}"
+
+    def test_no_root_ghost_on_plain_single_notes(self):
+        # 単音のみ → 下7半音に足さない
+        hits = [(t, [(49, ROOT_H)]) for t in (0.5, 1.5, 2.5)]
+        y = _mix(hits, 3.5)
+        events = [_ev(t, 49) for t in (0.5, 1.5, 2.5)]
+        out = complete_fifths(events, y, SR)
+        assert not [e for e in out if e.midi == 42], "単音に下方ルート幽霊を足さない"
+
+    def test_detected_root_not_duplicated(self):
+        hits = [(0.5, [(42, ROOT_H), (49, FIFTH_H)])]
+        y = _mix(hits, 1.5)
+        events = [_ev(0.5, 42), _ev(0.5, 49)]
+        out = complete_fifths(events, y, SR)
+        assert len([e for e in out if e.midi == 42]) == 1, "検出済みルートを重複させない"
