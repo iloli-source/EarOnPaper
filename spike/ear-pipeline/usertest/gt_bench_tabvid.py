@@ -69,7 +69,8 @@ def main() -> int:
     trs = json.loads(meta.read_text())
     res = gb.evaluate(ref, trs)
     print(json.dumps({"song": args.name, **{k: res[k] for k in (
-        "n_hyp_notes_window", "n_ref_notes", "matched", "precision", "recall", "f1")}},
+        "n_hyp_notes_window", "n_ref_notes", "matched", "stack_recall", "stack_events",
+        "precision", "recall", "f1")}},
         ensure_ascii=False))
     (out_dir / "result.json").write_text(json.dumps(res, ensure_ascii=False, indent=1))
     return 0

@@ -27,6 +27,7 @@ from pathlib import Path
 from earpipe.services.ear import (
     apply_postfilter,
     arbitrate_octaves,
+    complete_fifths,
     cleanup_upper_harmonics,
     bp_python_path,
     choose_engine,
@@ -245,7 +246,13 @@ def transcribe_file(
             # 見落とし補完と幽霊除去を行う(分離不明瞭なら何もしない)
             try:
                 y_arb, sr_arb = load_audio(in_path)
-                events = arbitrate_octaves(events, y_arb, sr_arb)
+                # #144: 5度補完→オクターブ裁定の順(逆順は夢見る0.771→0.750と退行)。
+                # ただし裁定のパワーコード文脈判定は検出器ネイティブの5度に限定する。
+                # 補完5度に文脈を作らせると2声曲でオクターブ裁定が+12幽霊を量産する
+                # (muzyx実測 0.830→0.824)
+                native = list(events)
+                events = complete_fifths(events, y_arb, sr_arb)
+                events = arbitrate_octaves(events, y_arb, sr_arb, context_events=native)
             except Exception:
                 pass  # 裁定の失敗で採譜を落とさない
             # 履歴(#144): posterior(生事後確率)によるテンプレ補完はA/Bで下位互換と実測

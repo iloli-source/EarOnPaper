@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 
 from earpipe.contracts import PitchEvent
@@ -36,6 +38,68 @@ _CQT_BINS = 84        # C1..B7
 _CQT_FMIN_MIDI = 24   # C1
 
 
+# 5度補完の物理ゲート(#144 夢見る実測 2026-07-26: 落ちた5度4/4件で
+# E(+7)/E(root)=0.31〜0.94, E(+26)/E(root)=0.20〜0.62, 対照ビン比1.3〜2.2)。
+# 較正(2026-07-26): 3ベンチ全候補ログ(yume44/muzyx57/octave114件)を正解ラベル付けし
+# 合同掃引した最適点。初期値(0.25/0.12/1.15)は幽霊過多で夢見る0.767→0.757と退行、
+# 本値で夢見る+0.006/muzyx+0.013/octave±0(幽霊0)の全ベンチ・パレート改善。
+FIFTH_F0_RATIO = 0.40    # E(+7) ≥ この比 × E(root f0) (5度の基音1.5f0=非重複)
+FIFTH_P3_RATIO = 0.10    # E(+26) ≥ この比 × E(root f0) (5度の第3倍音4.5f0=非重複)
+FIFTH_CTRL_MARGIN = 1.4   # E(+7) が隣接ビン(±1半音)の最大よりこの倍数以上
+
+
+def complete_fifths(events: list[PitchEvent], y: np.ndarray, sr: int) -> list[PitchEvent]:
+    """5度(+7)構成音を非重複倍音の直接測定で補完する(検出器の縦積み実績に依存しない)。
+
+    パワーコードの5度は偶数次倍音が全てルートと共有され検出器に落とされやすいが、
+    奇数次(基音1.5f0=+7・第3倍音4.5f0=+26)はルートのどの倍音とも一致しない。
+    この2帯の同時成立+隣接ビン対照で「ルートの響き」と「実在する2本目の弦」を
+    分離する(Klapuri 2003のスペクトル平滑性原理の局所適用)。
+    """
+    if not events or y is None or len(y) == 0:
+        return list(events)
+    import librosa
+
+    C = np.abs(librosa.cqt(np.asarray(y, dtype=np.float32), sr=sr,
+                           fmin=librosa.midi_to_hz(_CQT_FMIN_MIDI),
+                           n_bins=_CQT_BINS, bins_per_octave=12))
+    times = librosa.times_like(C, sr=sr)
+
+    def e(midi: int, t0: float, t1: float) -> float:
+        b = midi - _CQT_FMIN_MIDI
+        if not 0 <= b < C.shape[0]:
+            return 0.0
+        i0, i1 = np.searchsorted(times, t0), np.searchsorted(times, t1)
+        return float(np.median(C[b, i0:i1])) if i1 > i0 else 0.0
+
+    def ov(a: PitchEvent, t0: float, t1: float) -> float:
+        return min(a.offset, t1) - max(a.onset, t0)
+
+    out = list(events)
+    for r in events:
+        if any(x.midi == r.midi + 7 and ov(x, r.onset, r.offset) > 0.03 for x in out):
+            continue
+        e_root = e(r.midi, r.onset, r.offset)
+        if e_root <= 0:
+            continue
+        e_f = e(r.midi + 7, r.onset, r.offset)
+        e_p3 = e(r.midi + 26, r.onset, r.offset)
+        ctrl = max(e(r.midi + 6, r.onset, r.offset), e(r.midi + 8, r.onset, r.offset))
+        _log = os.environ.get("EARPIPE_FIFTH_LOG")
+        if _log:  # 較正用計測(ゲート判定前の生値を全候補で記録)
+            import json as _json
+            with open(_log, "a") as f:
+                f.write(_json.dumps({"midi": r.midi, "onset": round(r.onset, 3),
+                                     "rf": round(e_f / e_root, 4), "r3": round(e_p3 / e_root, 4),
+                                     "rc": round(e_f / max(ctrl, 1e-9), 4)}) + "\n")
+        if (e_f >= FIFTH_F0_RATIO * e_root
+                and e_p3 >= FIFTH_P3_RATIO * e_root
+                and e_f > FIFTH_CTRL_MARGIN * ctrl):
+            out.append(PitchEvent(onset=r.onset, offset=r.offset, midi=r.midi + 7,
+                                  confidence=round(r.confidence * 0.5, 4)))
+    return sorted(out, key=lambda x: (x.onset, x.midi))
+
+
 def _even_odd_ratio(C: np.ndarray, times: np.ndarray, root: int,
                     t0: float, t1: float) -> float:
     """ルートの偶数倍音(2f0,4f0=+12,+24) / 奇数側(f0,3f0≈+19) エネルギー比。"""
@@ -53,8 +117,14 @@ def _even_odd_ratio(C: np.ndarray, times: np.ndarray, root: int,
     return even / max(odd, 1e-9)
 
 
-def arbitrate_octaves(events: list[PitchEvent], y: np.ndarray, sr: int) -> list[PitchEvent]:
-    """パワーコード文脈(+7同時)のルートについて+12構成音を証拠ベースで裁定する。"""
+def arbitrate_octaves(events: list[PitchEvent], y: np.ndarray, sr: int,
+                      context_events: list[PitchEvent] | None = None) -> list[PitchEvent]:
+    """パワーコード文脈(+7同時)のルートについて+12構成音を証拠ベースで裁定する。
+
+    context_events: 文脈判定(どのルートがパワーコードか)に使う集合。既定は events。
+    complete_fifths の補完5度で新規文脈を作らないよう、パイプラインは検出器
+    ネイティブの集合を渡す(補完5度が文脈になると2声曲で+12幽霊が量産される)。
+    """
     if not events or y is None or len(y) == 0:
         return sorted(events, key=lambda e: (e.onset, e.midi))
     import librosa
@@ -62,10 +132,11 @@ def arbitrate_octaves(events: list[PitchEvent], y: np.ndarray, sr: int) -> list[
     def ov(a: PitchEvent, b: PitchEvent) -> float:
         return min(a.offset, b.offset) - max(a.onset, b.onset)
 
-    # パワーコード文脈のルートヒットを収集
+    # パワーコード文脈のルートヒットを収集(文脈はネイティブ検出に限定可)
+    ctx_src = context_events if context_events is not None else events
     contexts: list[PitchEvent] = [
-        r for r in events
-        if any(f.midi - r.midi == 7 and ov(r, f) > FIFTH_OV_SEC for f in events)
+        r for r in ctx_src
+        if any(f.midi - r.midi == 7 and ov(r, f) > FIFTH_OV_SEC for f in ctx_src)
     ]
     by_root: dict[int, list[PitchEvent]] = {}
     for r in contexts:

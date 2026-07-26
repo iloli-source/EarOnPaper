@@ -169,6 +169,49 @@ def lcs_match(ref_seq: list[int], hyp_seq: list[int]) -> int:
     return dp[-1]
 
 
+def lcs_backtrace(ref_seq: list[int], hyp_seq: list[int]) -> dict[int, int]:
+    """LCSの対応付け(ref index -> hyp index)。縦積み再現率の算出に使う。"""
+    n, m = len(ref_seq), len(hyp_seq)
+    dp = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            dp[i][j] = dp[i-1][j-1] + 1 if ref_seq[i-1] == hyp_seq[j-1] \
+                else max(dp[i-1][j], dp[i][j-1])
+    match: dict[int, int] = {}
+    i, j = n, m
+    while i > 0 and j > 0:
+        if ref_seq[i-1] == hyp_seq[j-1] and dp[i][j] == dp[i-1][j-1] + 1:
+            match[i-1] = j-1
+            i -= 1
+            j -= 1
+        elif dp[i-1][j] >= dp[i][j-1]:
+            i -= 1
+        else:
+            j -= 1
+    return match
+
+
+def stack_recall(ref: dict, matched_ref_idx: set[int]) -> tuple[int, int]:
+    """縦積み再現率(#144要件ゲート): 参照の和音イベント(2声以上)のうち、
+    2声以上がマッチした(=TABで縦積みが再現された)イベントの数を返す。
+
+    和音が拾えない採譜はTAB譜として要件不充足(ユーザー指摘 2026-07-26)。
+    総合F1が良くても縦積みが単音化していれば、この指標が落ちる。
+    """
+    k = 0
+    total = ok = 0
+    for ev in ref["events"]:
+        mids = sorted(ref["chords"][ev["chord"]]["midis"])
+        idxs = range(k, k + len(mids))
+        k += len(mids)
+        if len(mids) < 2:
+            continue
+        total += 1
+        if sum(1 for i in idxs if i in matched_ref_idx) >= 2:
+            ok += 1
+    return ok, total
+
+
 def evaluate(ref: dict, trs: dict) -> dict:
     ref_notes = ref_note_seq(ref)
     hyp_notes = hyp_note_seq(trs)
@@ -186,6 +229,8 @@ def evaluate(ref: dict, trs: dict) -> dict:
     window = hyp_notes[first:end]
     hyp_pitches = [m for _, m in window]
     matched = lcs_match(ref_pitches, hyp_pitches)
+    bt = lcs_backtrace(ref_pitches, hyp_pitches)
+    st_ok, st_total = stack_recall(ref, set(bt.keys()))
     precision = matched / len(hyp_pitches) if hyp_pitches else 0.0
     recall = matched / len(ref_pitches) if ref_pitches else 0.0
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
@@ -197,6 +242,8 @@ def evaluate(ref: dict, trs: dict) -> dict:
         "n_hyp_notes_window": len(hyp_pitches),
         "n_ref_notes": len(ref_pitches),
         "matched": matched,
+        "stack_recall": round(st_ok / st_total, 3) if st_total else None,
+        "stack_events": f"{st_ok}/{st_total}",
         "precision": round(precision, 3),
         "recall": round(recall, 3),
         "f1": round(f1, 3),
@@ -230,14 +277,15 @@ def main() -> int:
         f"正解: 作曲者本人演奏動画 / 参照: {ref['scope']}",
         "指標は成果物(ギターTAB)レベルの配列LCS(音域折り込み+重複除去・時刻非依存)。数値は今後の精度改善(#114)のベースライン。",
         "",
-        "| variant | engine | BPM(出所) | 検出音数(窓/全) | 参照音数 | 一致 | precision | recall | F1 |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| variant | engine | BPM(出所) | 検出音数(窓/全) | 参照音数 | 一致 | 縦積み再現 | precision | recall | F1 |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for v, r in rows.items():
         lines.append(
             f"| {v} | {r['engine']} | {round(r['bpm'])}({r['bpm_source']}) "
             f"| {r['n_hyp_notes_window']}/{r['n_hyp_notes_total']} | {r['n_ref_notes']} "
-            f"| {r['matched']} | {r['precision']} | {r['recall']} | {r['f1']} |")
+            f"| {r['matched']} | {r['stack_events']}({r['stack_recall']}) "
+            f"| {r['precision']} | {r['recall']} | {r['f1']} |")
     report = OUT_DIR / "report.md"
     report.write_text("\n".join(lines) + "\n", encoding="utf-8")
     (OUT_DIR / "results.json").write_text(json.dumps(rows, ensure_ascii=False, indent=1))
