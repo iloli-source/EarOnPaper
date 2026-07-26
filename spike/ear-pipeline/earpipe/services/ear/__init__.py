@@ -2,7 +2,11 @@ from earpipe.services.ear.adaptive import AdaptiveSelection, detect_events_adapt
 from earpipe.services.ear.mono import detect_events
 from earpipe.services.ear.poly import bp_python_path, detect_events_poly
 from earpipe.services.ear.field_select import gate_by_class, select_events
-from earpipe.services.ear.octave_arbiter import arbitrate_octaves, complete_fifths
+from earpipe.services.ear.octave_arbiter import (
+    arbitrate_octaves,
+    complete_fifths,
+    complete_missed_strokes,
+)
 from earpipe.services.ear.postfilter import apply_postfilter, cleanup_upper_harmonics
 from earpipe.services.ear.engine_select import (
     EngineChoice,
@@ -46,6 +50,7 @@ __all__ = [
     "apply_postfilter",
     "arbitrate_octaves",
     "complete_fifths",
+    "complete_missed_strokes",
     "cleanup_upper_harmonics",
     "select_events",
     "gate_by_class",

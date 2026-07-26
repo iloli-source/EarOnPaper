@@ -12,7 +12,7 @@ E(+7)/E(root)=0.31〜0.94・E(+26)/E(root)=0.20〜0.62・隣接ビン対照の1.
 import numpy as np
 
 from earpipe.contracts import PitchEvent
-from earpipe.services.ear.octave_arbiter import complete_fifths
+from earpipe.services.ear.octave_arbiter import complete_fifths, complete_missed_strokes
 
 SR = 22050
 
@@ -107,3 +107,34 @@ class TestRootBelowCompletion:
         events = [_ev(0.5, 42), _ev(0.5, 49)]
         out = complete_fifths(events, y, SR)
         assert len([e for e in out if e.midi == 42]) == 1, "検出済みルートを重複させない"
+
+
+class TestMissedStrokeCompletion:
+    def test_recovers_whole_missing_stroke(self):
+        # 4打とも同じパワーコード(42+49)が鳴っているが、2打目だけ検出器が
+        # まるごと落とした → 音声のオンセット+曲内和音語彙から一打を復元
+        chord = [(42, ROOT_H), (49, FIFTH_H)]
+        hits = [(t, chord) for t in (0.5, 1.5, 2.5, 3.5)]
+        y = _mix(hits, 4.5)
+        events = [e for t in (0.5, 2.5, 3.5) for e in (_ev(t, 42), _ev(t, 49))]
+        out = complete_missed_strokes(events, y, SR)
+        added = [e for e in out if abs(e.onset - 1.5) < 0.12]
+        assert {e.midi for e in added} == {42, 49}, f"落ちた一打が語彙から復元される: {sorted(e.midi for e in added)}"
+
+    def test_no_completion_on_silent_gap(self):
+        # 休符区間(音が無い)にはオンセットが無いので何も足さない
+        chord = [(42, ROOT_H), (49, FIFTH_H)]
+        hits = [(t, chord) for t in (0.5, 3.5)]
+        y = _mix(hits, 4.5)
+        events = [e for t in (0.5, 3.5) for e in (_ev(t, 42), _ev(t, 49))]
+        out = complete_missed_strokes(events, y, SR)
+        mid = [e for e in out if 1.0 < e.onset < 3.0]
+        assert not mid, "休符に幽霊の一打を足さない"
+
+    def test_detected_strokes_untouched(self):
+        chord = [(42, ROOT_H), (49, FIFTH_H)]
+        hits = [(t, chord) for t in (0.5, 1.5)]
+        y = _mix(hits, 2.5)
+        events = [e for t in (0.5, 1.5) for e in (_ev(t, 42), _ev(t, 49))]
+        out = complete_missed_strokes(events, y, SR)
+        assert len(out) == len(events), "検出済みの打には何も足さない"

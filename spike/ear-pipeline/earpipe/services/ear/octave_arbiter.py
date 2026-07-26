@@ -134,6 +134,104 @@ def complete_fifths(events: list[PitchEvent], y: np.ndarray, sr: int) -> list[Pi
     return sorted(out, key=lambda x: (x.onset, x.midi))
 
 
+# 一打まるごと欠落の復元(#144): 検出器が完全に落としたストロークを、
+# 音声のオンセット(演奏の物理事実)+曲内和音語彙(その曲で実在した打の型)で復元する。
+# 単発の音符プローブでは届かない"whole-event miss"(夢見る実測5件)への対処
+STROKE_ONSET_TOL = 0.10   # 検出イベントとみなすオンセット近傍(秒)
+STROKE_BETA = 0.6         # 語彙メンバー実在判定: 典型エネルギーのこの比以上
+# gt-octave実測の幽霊対策: 伴奏ベースのbleed単音が第2倍音でオクターブペア語彙の
+# 上声を偽装する(βゲートも立ち上がりゲートも通ってしまう=本物の打だから)。
+# ペア語彙{m, m+12}の上声は偶奇倍音比の絶対ゲートで「重ねが実在する打」だけを通す。
+# 0.8では伴奏ベースbleedの偶数優勢音色が2件通過(gt-octave実測) → 過去実測の
+# 「重ねなし単音帯の上限1.04」(0.38〜1.04 vs 重ねあり0.98〜4.8)を超える1.05に設定
+STROKE_PAIR_MIN_EVEN = 1.05
+# 既知トレードオフ(2026-07-26採用時): gt-octaveで参照休符位置に語彙一打を1回誤補完
+# (13.13s {55,67}: 伴奏bleedの強オンセット+本物同様の倍音構成でゲート分離不能)。
+# 3ベンチ総合: 夢見るF1+0.014/縦積み+7.4pt, muzyx+0.001/+2.0pt, octave-0.007/縦積み±0
+# → 要件ゲート(縦積み)優先で採用。GuitarSet(#147)拡充後に再較正する
+STROKE_MIN_TEMPLATE = 2   # 語彙採用に必要な同一ピッチ集合の出現回数
+STROKE_MEMBER_PASS = 1.0  # 語彙セットの全メンバーが実在判定を通ること(1.0=全員)
+
+
+def complete_missed_strokes(events: list[PitchEvent], y: np.ndarray, sr: int) -> list[PitchEvent]:
+    """検出器がまるごと落とした一打を、実測オンセット+曲内語彙で復元する。
+
+    1. 検出イベントの無い音声オンセット(孤児オンセット)を列挙
+    2. 曲内で2回以上出現した2声以上のピッチ集合を語彙とする
+    3. 孤児オンセットで語彙セットの全メンバーのf0帯に典型比0.6以上の
+       エネルギーが実在すれば、そのセットの一打として補完
+    """
+    if not events or y is None or len(y) == 0:
+        return list(events)
+    import librosa
+    from collections import Counter
+
+    C = np.abs(librosa.cqt(np.asarray(y, dtype=np.float32), sr=sr,
+                           fmin=librosa.midi_to_hz(_CQT_FMIN_MIDI),
+                           n_bins=_CQT_BINS, bins_per_octave=12))
+    times = librosa.times_like(C, sr=sr)
+
+    def e(midi: int, t0: float, t1: float) -> float:
+        b = midi - _CQT_FMIN_MIDI
+        if not 0 <= b < C.shape[0]:
+            return 0.0
+        i0, i1 = np.searchsorted(times, t0), np.searchsorted(times, t1)
+        return float(np.median(C[b, i0:i1])) if i1 > i0 else 0.0
+
+    # 1. 孤児オンセット
+    onsets = librosa.onset.onset_detect(y=np.asarray(y, dtype=np.float32), sr=sr,
+                                        units="time", backtrack=False)
+    ev_onsets = np.array(sorted(x.onset for x in events))
+    orphans = [float(t) for t in onsets
+               if not (np.abs(ev_onsets - t) < STROKE_ONSET_TOL).any()]
+    if not orphans:
+        return sorted(events, key=lambda x: (x.onset, x.midi))
+
+    # 2. 曲内語彙(2声以上×2回以上)と各ピッチの典型エネルギー・典型長
+    clusters: list[list] = []
+    for x in sorted(events, key=lambda x: (x.onset, x.midi)):
+        if clusters and x.onset - clusters[-1][0] < 0.08:
+            clusters[-1][1].append(x)
+        else:
+            clusters.append([x.onset, [x]])
+    sets = Counter(frozenset(x.midi for x in c[1]) for c in clusters if len(c[1]) >= 2)
+    vocab = [set(fs) for fs, n in sets.items() if n >= STROKE_MIN_TEMPLATE]
+    if not vocab:
+        return sorted(events, key=lambda x: (x.onset, x.midi))
+    typ: dict[int, list[float]] = {}
+    durs: list[float] = []
+    for t0, mem in clusters:
+        for x in mem:
+            typ.setdefault(x.midi, []).append(e(x.midi, t0, t0 + 0.3))
+            durs.append(x.offset - x.onset)
+    typm = {k: float(np.median(v)) for k, v in typ.items()}
+    dur = float(np.clip(np.median(durs), 0.1, 0.6)) if durs else 0.3
+
+    # 3. 孤児オンセットごとに語彙を照合(全メンバー実在のセットのみ・最大集合を採用)
+    out = list(events)
+    for t in orphans:
+        passing = []
+        for V in vocab:
+            def member_ok(m: int) -> bool:
+                if typm.get(m, 0.0) <= 0 or e(m, t, t + 0.3) < STROKE_BETA * typm[m]:
+                    return False
+                if m - 12 in V:  # オクターブペアの上声: 偶奇比の絶対ゲートで裁定
+                    ratio = _even_odd_ratio(C, times, m - 12, t, t + 0.3)
+                    if ratio < STROKE_PAIR_MIN_EVEN:
+                        return False
+                return True
+
+            ok = [m for m in V if member_ok(m)]
+            if len(ok) >= STROKE_MEMBER_PASS * len(V):
+                passing.append(V)
+        if not passing:
+            continue
+        best = max(passing, key=len)
+        for m in best:
+            out.append(PitchEvent(onset=t, offset=t + dur, midi=m, confidence=0.35))
+    return sorted(out, key=lambda x: (x.onset, x.midi))
+
+
 def _even_odd_ratio(C: np.ndarray, times: np.ndarray, root: int,
                     t0: float, t1: float) -> float:
     """ルートの偶数倍音(2f0,4f0=+12,+24) / 奇数側(f0,3f0≈+19) エネルギー比。"""

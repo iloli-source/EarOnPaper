@@ -28,6 +28,7 @@ from earpipe.services.ear import (
     apply_postfilter,
     arbitrate_octaves,
     complete_fifths,
+    complete_missed_strokes,
     cleanup_upper_harmonics,
     bp_python_path,
     choose_engine,
@@ -253,6 +254,9 @@ def transcribe_file(
                 native = list(events)
                 events = complete_fifths(events, y_arb, sr_arb)
                 events = arbitrate_octaves(events, y_arb, sr_arb, context_events=native)
+                # #144: 検出器がまるごと落とした一打を実測オンセット+曲内語彙で復元
+                # (裁定後の最も確からしい語彙で照合するため最後段)
+                events = complete_missed_strokes(events, y_arb, sr_arb)
             except Exception:
                 pass  # 裁定の失敗で採譜を落とさない
             # 履歴(#144): posterior(生事後確率)によるテンプレ補完はA/Bで下位互換と実測
