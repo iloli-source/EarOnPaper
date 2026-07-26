@@ -526,12 +526,21 @@ ipcMain.handle('import-url', async (event, url, progressToken = null) => {
   const dlDir = registerRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-dl-')))
   const args = pu.buildYtDlpArgs(url, dlDir)
   try {
-    const { stdout } = await runCapturedProcess(ytdlp, args, {
+    const runOpts = {
       env: { ...process.env },
       timeoutMs: DOWNLOAD_TIMEOUT_MS,
       operationToken: progressToken,
       onProgress: (line) => safeProgress(event.sender, line, progressToken),
-    })
+    }
+    let stdout
+    try {
+      ;({ stdout } = await runCapturedProcess(ytdlp, args, runOpts))
+    } catch (firstErr) {
+      // 403はYouTube側のクライアント制限/キャッシュ腐敗が主因 → 定番回避策で1回だけ自動再試行
+      if (!/403/.test(String(firstErr && firstErr.message))) throw firstErr
+      safeProgress(event.sender, '403のため別方式で再試行中...', progressToken)
+      ;({ stdout } = await runCapturedProcess(ytdlp, pu.buildYtDlpRetryArgs(url, dlDir), runOpts))
+    }
     const lines = stdout.trim().split(/\r?\n/).filter(Boolean)
     const reportedPath = lines[lines.length - 1]
     if (!reportedPath) throw new Error('取り込んだ音声ファイルの保存先を取得できませんでした')
@@ -562,6 +571,13 @@ ipcMain.handle('import-url', async (event, url, progressToken = null) => {
           ? 'winget install yt-dlp.yt-dlp'
           : 'お使いのLinuxのパッケージ管理機能で yt-dlp をインストール'
       throw new Error(`yt-dlp が見つかりません。${install}してから再試行してください`)
+    }
+    if (/403/.test(String(err && err.message))) {
+      throw new Error(
+        '動画データの取得がブロックされました(HTTP 403)。時間をおいて再試行するか、'
+        + 'yt-dlp を更新(brew upgrade yt-dlp)してください。'
+        + '地域・年齢制限や会員限定の動画は取得できない場合があります'
+      )
     }
     throw err
   }

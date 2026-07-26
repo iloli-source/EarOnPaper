@@ -218,6 +218,17 @@ function buildYtDlpArgs(url, outDir) {
   ]
 }
 
+// HTTP 403時の再試行引数: YouTube側のクライアント制限や署名キャッシュ腐敗が主因のため、
+// キャッシュ削除+androidクライアント+PO token欠落フォーマット許可で1回だけ再試行する
+// (yt-dlp公式Issue #14680系の定番回避策。通常引数の安全制約はそのまま維持)
+function buildYtDlpRetryArgs(url, outDir) {
+  return [
+    '--rm-cache-dir',
+    '--extractor-args', 'youtube:player_client=default,android;formats=missing_pot',
+    ...buildYtDlpArgs(url, outDir),
+  ]
+}
+
 // #128: yt-dlp実行ファイル候補。環境変数→Homebrew(AppleSilicon/Intel)→PATHの順
 // (pythonCandidates/resolveExecutable と同パターン)。
 function ytDlpCandidates(env = process.env) {
@@ -228,6 +239,7 @@ function ytDlpCandidates(env = process.env) {
 }
 
 module.exports = {
+  buildYtDlpRetryArgs,
   AUDIO_EXTENSIONS,
   OUTPUT_EXTENSIONS,
   MAX_TITLE_LEN,

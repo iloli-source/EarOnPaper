@@ -151,6 +151,16 @@ test('buildYtDlpArgs: --no-playlist固定・音声抽出・URLは末尾', () => 
   assert.strictEqual(args[args.length - 1], 'https://youtu.be/x', 'URLが最終引数')
 })
 
+test('buildYtDlpRetryArgs: 403再試行はキャッシュ削除+androidクライアント+通常引数を含む', () => {
+  const args = pu.buildYtDlpRetryArgs('https://youtu.be/x', '/tmp/dl')
+  assert.ok(args.includes('--rm-cache-dir'), '腐った署名キャッシュを捨てる')
+  const i = args.indexOf('--extractor-args')
+  assert.ok(i >= 0 && /player_client=.*android/.test(args[i + 1]), 'androidクライアントで再試行')
+  assert.ok(/missing_pot/.test(args[i + 1]), 'PO token欠落フォーマットを許可')
+  assert.ok(args.includes('--no-playlist'), '通常引数(安全制約)も維持')
+  assert.strictEqual(args[args.length - 1], 'https://youtu.be/x', 'URLが最終引数')
+})
+
 test('ytDlpCandidates: 環境変数が最優先・Homebrewパス・PATHフォールバック', () => {
   const withEnv = pu.ytDlpCandidates({ EARPIPE_YTDLP: '/custom/yt-dlp' })
   assert.strictEqual(withEnv[0], '/custom/yt-dlp')
