@@ -533,15 +533,27 @@ document.getElementById('btn-export-analysis').addEventListener('click', async (
 // 詳細(音楽家向け)エクスポート(#129): 簡譜/リードシート/GP5/度数/Nashville
 const EXTRA_EXTS = { jianpu: 'txt', leadsheet: 'txt', gp5: 'gp5', roman: 'txt', nashville: 'txt' }
 document.querySelectorAll('#extra-export-buttons .btn-export-extra').forEach((btn) => {
+  const statusEl = btn.querySelector('.btn-export-status')
+  const setStatus = (cls, text) => {
+    btn.classList.remove('is-busy', 'is-done', 'is-error')
+    if (cls) btn.classList.add(cls)
+    if (statusEl) statusEl.textContent = text
+  }
   btn.addEventListener('click', async () => {
     const key = btn.dataset.extra
-    if (!currentInput || !key) return
+    if (!currentInput || !key || btn.disabled) return
     const name = window.earpipe.exportFileName(currentTitle, currentInstrument, key, EXTRA_EXTS[key] || 'txt')
     btn.disabled = true
+    setStatus('is-busy', '生成中…')
     try {
-      await window.earpipe.exportExtra(currentInput, key, null, name)
+      const saved = await window.earpipe.exportExtra(currentInput, key, null, name)
+      // saved=null は保存ダイアログのキャンセル(正常系・無表示に戻す)
+      setStatus(saved ? 'is-done' : null, saved ? '✓ 保存' : '')
+    } catch {
+      setStatus('is-error', '失敗')
     } finally {
       btn.disabled = false
+      setTimeout(() => setStatus(null, ''), 4000)
     }
   })
 })

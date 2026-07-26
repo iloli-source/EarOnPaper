@@ -130,21 +130,23 @@
               </button>
             </div>
             <!-- 音楽家向け 詳細エクスポート(#129): CLIの--format/--analysisをGUIへ露出 -->
+            <div class="extra-export-title">音楽家向け形式</div>
+            <div class="extra-export-caption">理論系の追加フォーマット。クリックで生成して保存できます</div>
             <div class="export-buttons" id="extra-export-buttons">
-              <button class="btn-export btn-export-extra" data-extra="jianpu">
-                <span class="btn-export-icon">🔢</span>簡譜
+              <button class="btn-export btn-export-extra" data-extra="jianpu" title="数字譜(1〜7で音高を表すテキスト)">
+                <span class="btn-export-icon">🔢</span><span class="btn-export-label">簡譜</span><span class="btn-export-status"></span>
               </button>
-              <button class="btn-export btn-export-extra" data-extra="leadsheet">
-                <span class="btn-export-icon">🎼</span>リードシート
+              <button class="btn-export btn-export-extra" data-extra="leadsheet" title="メロディ+コードネームのテキスト">
+                <span class="btn-export-icon">🎼</span><span class="btn-export-label">リードシート</span><span class="btn-export-status"></span>
               </button>
-              <button class="btn-export btn-export-extra" data-extra="gp5">
-                <span class="btn-export-icon">🎸</span>Guitar Pro
+              <button class="btn-export btn-export-extra" data-extra="gp5" title="Guitar Pro 5形式(.gp5)">
+                <span class="btn-export-icon">🎸</span><span class="btn-export-label">Guitar Pro</span><span class="btn-export-status"></span>
               </button>
-              <button class="btn-export btn-export-extra" data-extra="roman">
-                <span class="btn-export-icon">🏛️</span>度数(ローマ数字)
+              <button class="btn-export btn-export-extra" data-extra="roman" title="コード進行のローマ数字分析">
+                <span class="btn-export-icon">🏛️</span><span class="btn-export-label">度数分析</span><span class="btn-export-status"></span>
               </button>
-              <button class="btn-export btn-export-extra" data-extra="nashville">
-                <span class="btn-export-icon">🤠</span>Nashville
+              <button class="btn-export btn-export-extra" data-extra="nashville" title="Nashvilleナンバーシステム">
+                <span class="btn-export-icon">🤠</span><span class="btn-export-label">ナッシュビル</span><span class="btn-export-status"></span>
               </button>
             </div>
           </div>
