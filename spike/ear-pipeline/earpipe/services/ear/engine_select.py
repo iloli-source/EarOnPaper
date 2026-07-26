@@ -23,8 +23,11 @@ import numpy as np
 
 from earpipe.contracts import PitchEvent
 
-# 同時発音の独立基音がこの中央値以上なら多声と判定
-POLY_MIN = 5.0
+# 同時発音の独立基音がこの中央値以上なら多声と判定。
+# 5.0→3.5 (2026-07-26 GuitarSet実測): ソロギターの和音弾き(comping)は4前後に出て
+# 5.0だとmono行き=採譜がほぼ空になる(BN1-129: polyphony4.00→10音/正解133音)。
+# 単旋律の実測上限3.0(むすんでひらいて)との間の3.5に設定
+POLY_MIN = 3.5
 # エネルギーのあるフレームだけを対象にする分位点
 _ENERGY_PERCENTILE = 60.0
 # ピーク採用の相対しきい(最大ピークから-18dB)
