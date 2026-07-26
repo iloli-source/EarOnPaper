@@ -212,7 +212,9 @@ def stack_recall(ref: dict, matched_ref_idx: set[int]) -> tuple[int, int]:
     return ok, total
 
 
-def evaluate(ref: dict, trs: dict) -> dict:
+def evaluate(ref: dict, trs: dict, gap_sec: float = 2.0) -> dict:
+    """gap_sec: 窓を閉じる無音ギャップ秒(夢見る=イントロ後のブレイク検出用)。
+    0以下で無効(GuitarSet等、参照が全曲を覆う素材向け)。"""
     ref_notes = ref_note_seq(ref)
     hyp_notes = hyp_note_seq(trs)
     ref_pitches = [m for _, m in ref_notes]
@@ -222,10 +224,11 @@ def evaluate(ref: dict, trs: dict) -> dict:
     first = next((i for i, (_, m) in enumerate(hyp_notes) if m in ref_set), 0)
     # イントロ終端の切れ目(2秒超の無音ギャップ=Aメロ前のブレイク)で窓を閉じる
     end = len(hyp_notes)
-    for i in range(first + 1, len(hyp_notes)):
-        if hyp_notes[i][0] - hyp_notes[i - 1][0] > 2.0:
-            end = i
-            break
+    if gap_sec > 0:
+        for i in range(first + 1, len(hyp_notes)):
+            if hyp_notes[i][0] - hyp_notes[i - 1][0] > gap_sec:
+                end = i
+                break
     window = hyp_notes[first:end]
     hyp_pitches = [m for _, m in window]
     matched = lcs_match(ref_pitches, hyp_pitches)
