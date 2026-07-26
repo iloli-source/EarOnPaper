@@ -17,6 +17,7 @@ for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
 import argparse
 import json
 import math
+import re
 import sys
 import shutil
 import tempfile
@@ -240,6 +241,15 @@ def transcribe_file(
                 }
             else:
                 events = detect_events_poly(in_path, sensitivity=sensitivity)
+            # #147 剪定実験ゲート(env限定・既定OFF): 検出直後confのフロア。
+            # 補完段(5度/ストローク)は意図的に低confを付けるため、必ず補完より前に
+            # 適用する。適応プロファイル選択の後段なので選択比率にも干渉しない。
+            # A/B実測(2026-07-26, floor=0.35, GuitarSet10曲): F1 0.690→0.692 に対し
+            # 縦積み再現率 0.779→0.757 と退行。低confは和音構成音に偏るため
+            # confフロアは和音再現と衝突する — 既定採用しない(再現用に残す)。
+            conf_floor = float(os.environ.get("EARPIPE_POLY_CONF_FLOOR", "0") or 0)
+            if conf_floor > 0:
+                events = [e for e in events if e.confidence >= conf_floor]
             # #144: +19/24/28の弱い上方倍音は常時クリーンアップ(正解付き実曲で実測調律。
             # +12はパワーコードのオクターブ構成音と分離不能のため触らない)
             events = cleanup_upper_harmonics(events)
@@ -537,14 +547,21 @@ def _parse_emit_specs(
 
     文法: ``KEY[=PATH][#k=v,k=v]``。PATH 省略時は '入力名.KEY.拡張子'、
     ``#`` 以降はエミッタ固有パラメータ(カンマ区切りの k=v)。
+
+    '#'をパラメータ区切りとみなすのは末尾が k=v(,k=v)* 文法に合致する場合のみ。
+    GuitarSet の 'C#' 入り曲名のようにパス自体が '#' を含むケースを
+    黙って切り詰めない(最後の'#'で判定するのでパス側の'#'は保持される)。
     """
     if not specs:
         return None
+    param_grammar = re.compile(r"\s*[\w.-]+\s*=[^,#=]*(,\s*[\w.-]+\s*=[^,#=]*)*\s*")
     parsed: list[tuple[str, str, dict]] = []
     for spec in specs:
-        head, sep_p, param_str = spec.partition("#")
+        head, sep_p, param_str = spec.rpartition("#")
+        if not sep_p or not param_grammar.fullmatch(param_str):
+            head, param_str = spec, ""
         params: dict[str, str] = {}
-        if sep_p:
+        if param_str:
             for kv in param_str.split(","):
                 if not kv.strip():
                     continue

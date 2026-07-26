@@ -83,7 +83,9 @@ def transcribe(song: str, force: bool) -> dict | None:
     tdir.mkdir(parents=True, exist_ok=True)
     cmd = [str(VENV_PY), "-m", "earpipe.pipeline", "transcribe", str(audio),
            "-o", str(tdir / "out.musicxml"), "--midi", str(tdir / "out.mid"),
-           "--tab", str(tdir / "out_tab.pdf"), "--engine", "auto", "--title", song]
+           "--tab", str(tdir / "out_tab.pdf"), "--engine", "auto", "--title", song,
+           # #147剪定前提(a): confidence/実オンセット込みノート列を機械可読で残す
+           "--emit", f"notesjson={tdir / 'notes.json'}"]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=TRS_TIMEOUT)
     if r.returncode != 0:
         print(f"[fail] {song}: {r.stderr[-200:]}")
