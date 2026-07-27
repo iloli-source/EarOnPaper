@@ -346,6 +346,7 @@ def transcribe_file(
             if stem_used:
                 full_res = transcribe_file(
                     in_path_orig, engine="poly",
+                    field_mode=field_mode,
                     bpm_override=bpm_override, bpm_range=bpm_range,
                     beats_per_measure=beats_per_measure,
                     key_tonic=key_tonic, key_mode=key_mode,

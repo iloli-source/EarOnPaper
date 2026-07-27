@@ -35,8 +35,11 @@ def remap_spans(
     dst_bpm, dst_trim, dst_anchor = dst
 
     def conv(beats: float) -> float:
-        sec = src_trim + (beats - src_anchor) * 60.0 / src_bpm
-        return dst_anchor + (sec - dst_trim) * dst_bpm / 60.0
+        # anchor_to_zero は先頭音符が0拍になるよう start_beats から lead を引く。
+        # つまり保存拍 b の格子上の位置は b + anchor(トリム起点の拍軸)。
+        # 符号を誤ると両ランのlead差だけコードがずれる(レビュー指摘 #151)。
+        sec = src_trim + (beats + src_anchor) * 60.0 / src_bpm
+        return (sec - dst_trim) * dst_bpm / 60.0 - dst_anchor
 
     return [
         replace(cs, start_beats=conv(cs.start_beats), end_beats=conv(cs.end_beats))
@@ -62,16 +65,39 @@ def inject_chords(score, spans: Sequence[ChordSpan], beats: int) -> int:
     injected = 0
     for m, measure_slots in enumerate(slots):
         for beat_in, cs in measure_slots:
+            figure = _m21_figure(cs.name)
+            if not figure:
+                continue
             try:
-                sym = harmony.ChordSymbol(_m21_figure(cs.name))
+                sym = harmony.ChordSymbol(figure)
             except Exception:
                 continue
             sym.writeAsChord = False
+            # 五線上部に固定(リードシート慣行)。未指定だとVerovioの配置が
+            # 上下混在し得る(実曲検証で発見・#151)
+            sym.placement = "above"
             measures[m].insert(beat_in, sym)
             injected += 1
     return injected
 
 
 def _m21_figure(name: str) -> str:
-    """エンジンのコード名を music21 の figure 表記へ写す(現状ほぼ恒等)。"""
-    return name.replace("N.C.", "").strip() or name
+    """エンジンのコード名を music21 の figure 表記へ写す。
+
+    music21 はルート/ベースのフラットを 'b' でなく '-' で表す(Bb→B-)。
+    変換しないと ChordSymbol が ValueError となり、フラット系コードが
+    全て黙ってスキップされる(実曲検証で発見・#151)。シャープ '#' はそのまま。
+    """
+
+    def conv_root(part: str) -> str:
+        if len(part) >= 2 and part[0].isalpha() and part[1] == "b":
+            return part[0] + "-" + part[2:]
+        return part
+
+    name = name.replace("N.C.", "").strip()
+    if not name:
+        return ""
+    if "/" in name:
+        root, bass = name.split("/", 1)
+        return conv_root(root) + "/" + conv_root(bass)
+    return conv_root(name)

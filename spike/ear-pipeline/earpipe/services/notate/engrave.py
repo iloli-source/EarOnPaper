@@ -67,6 +67,26 @@ def plain_tempo_svg(svg: str) -> str:
     )
 
 
+# cairosvgはコードネーム(harm)内のSMuFL臨時記号グリフも解決できず豆腐化する
+# (#151実曲検証で発見)。VerovioはharmのシャープをU+EA66、フラットをU+EA64、
+# ナチュラルをU+EA65(figbass系)で出すため、ASCII表記(# / b)へ置換する。
+_HARM_ACCIDENTALS = {"": "#", "": "b", "": ""}
+
+
+def plain_harm_svg(svg: str) -> str:
+    """コードネーム(harm)の臨時記号SMuFLグリフをASCII表記へ変換する。"""
+
+    def _fix_harm_block(m: re.Match[str]) -> str:
+        block = m.group(0)
+        for glyph, ascii_repr in _HARM_ACCIDENTALS.items():
+            block = block.replace(glyph, ascii_repr)
+        return block
+
+    return re.sub(
+        r'<g[^>]*class="harm"[^>]*>.*?</g>', _fix_harm_block, svg, flags=re.S
+    )
+
+
 # cairosvgはフォント未指定のテキストをCJKグリフを持たないデフォルトフォントで
 # 描画し、日本語タイトルが豆腐(□)化する。ヘッダー(pgHead=曲名等)のテキストに
 # CJK対応フォントスタックを明示注入して防ぐ(macOS=Hiragino / Linux=Noto)。
@@ -95,7 +115,10 @@ def write_pdf(musicxml_path: str | Path, out_pdf: str | Path) -> dict:
     import cairosvg
     from pypdf import PdfWriter
 
-    svgs = [cjk_safe_header_svg(plain_tempo_svg(s)) for s in render_svg_pages(musicxml_path)]
+    svgs = [
+        cjk_safe_header_svg(plain_harm_svg(plain_tempo_svg(s)))
+        for s in render_svg_pages(musicxml_path)
+    ]
     writer = PdfWriter()
     for svg in svgs:
         page_pdf = cairosvg.svg2pdf(bytestring=svg.encode("utf-8"))
@@ -120,7 +143,10 @@ def write_png_preview(musicxml_path: str | Path, out_png: str | Path, page: int 
     """指定ページのPNGプレビューを生成する（確認・デモ用）。"""
     import cairosvg
 
-    svgs = [cjk_safe_header_svg(plain_tempo_svg(s)) for s in render_svg_pages(musicxml_path)]
+    svgs = [
+        cjk_safe_header_svg(plain_harm_svg(plain_tempo_svg(s)))
+        for s in render_svg_pages(musicxml_path)
+    ]
     idx = max(1, min(page, len(svgs))) - 1
     out_png = Path(out_png)
     out_png.parent.mkdir(parents=True, exist_ok=True)
