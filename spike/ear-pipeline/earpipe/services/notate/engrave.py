@@ -20,6 +20,54 @@ _VEROVIO_OPTIONS = {
 }
 
 
+# VerovioのMusicXMLインポータは、コードネーム(harmony)のMusicXML上の
+# staff=1指定を無視し、同時刻の音符がある譜表(大譜表の下段=staff 2)へ
+# 付け替えることがある(#151実曲検証: 80個中22個がstaff=2化→上下混在表示)。
+# MEIを経由して harm を staff=1 へ強制し、五線上部に揃える。
+_HARM_STAFF = re.compile(r'(<harm\b[^>]*?)staff="\d+"')
+
+
+def force_harm_staff1_mei(mei: str) -> str:
+    """MEIの harm 要素を全て staff=1 に付け替える(五線上部への固定)。"""
+    return _HARM_STAFF.sub(r'\1staff="1"', mei)
+
+
+# 隣接するコードネームが水平に密着して判読不能になることがある(Verovioは
+# harm同士の水平衝突を回避しない)。同一段(同y)のharmを左から走査し、直前の
+# ラベルと重なる場合は1段上へ退避させる(商業譜の2段書き慣行に相当)。
+_HARM_TEXT_RE = re.compile(
+    r'(<g[^>]*class="harm"[^>]*>.*?<tspan[^>]*font-size="(\d+)px" '
+    r'x="(\d+)" y="(\d+)">([^<]*)</tspan>.*?</g>)',
+    re.S,
+)
+_HARM_CHAR_W = 0.62      # 半角1文字の概算幅(フォントサイズ比)
+_HARM_PAD_PX = 60        # 隣接ラベル間の最小余白(SVG座標系)
+
+
+def stagger_harm_svg(svg: str) -> str:
+    """同一段で水平に衝突するコードネームを1段上へ退避させる。"""
+    entries = list(_HARM_TEXT_RE.finditer(svg))
+    if len(entries) < 2:
+        return svg
+    # 段(y)ごとに左から詰めていき、重なったら上の段(tier)へ逃がす
+    tiers: dict[tuple[int, int], float] = {}  # (baseline_y, tier) -> 右端x
+    replacements: list[tuple[str, str]] = []
+    for m in sorted(entries, key=lambda m: (int(m.group(4)), int(m.group(3)))):
+        block, font_px, x, y, text = m.group(1), int(m.group(2)), int(m.group(3)), int(m.group(4)), m.group(5)
+        width = len(text) * _HARM_CHAR_W * font_px
+        tier = 0
+        while tiers.get((y, tier), float("-inf")) + _HARM_PAD_PX > x:
+            tier += 1
+        tiers[(y, tier)] = x + width
+        if tier == 0:
+            continue
+        new_y = y - int(tier * font_px * 1.15)
+        replacements.append((block, block.replace(f'y="{y}"', f'y="{new_y}"')))
+    for old, new in replacements:
+        svg = svg.replace(old, new, 1)
+    return svg
+
+
 def render_svg_pages(musicxml_path: str | Path) -> list[str]:
     """MusicXMLをページ毎のSVG文字列に描画する。"""
     import verovio
@@ -29,6 +77,11 @@ def render_svg_pages(musicxml_path: str | Path) -> list[str]:
     data = Path(musicxml_path).read_text(encoding="utf-8")
     if not tk.loadData(data):
         raise RuntimeError(f"Verovioが読み込めないMusicXML: {musicxml_path}")
+    if "<harmony" in data:
+        mei = tk.getMEI()
+        fixed = force_harm_staff1_mei(mei)
+        if fixed != mei and not tk.loadData(fixed):
+            raise RuntimeError(f"harm staff補正後のMEIをVerovioが読めません: {musicxml_path}")
     pages = tk.getPageCount()
     if pages < 1:
         raise RuntimeError(f"描画ページが0（空のスコア?）: {musicxml_path}")
@@ -60,6 +113,9 @@ def plain_tempo_svg(svg: str) -> str:
         block = m.group(0)
         block = _MUSIC_FONT_TSPAN.sub("", block)
         block = re.sub(r">(\s*=\s*)<", ">BPM <", block)
+        # MEI経由の再読込(#151 harm staff補正)後は「= 126.0」が1つのtspanに
+        # まとまるため、数値直前の "=" もBPM表記へ置換する
+        block = re.sub(r">\s*=\s*(\d)", r">BPM \1", block)
         return block
 
     return re.sub(
@@ -116,7 +172,7 @@ def write_pdf(musicxml_path: str | Path, out_pdf: str | Path) -> dict:
     from pypdf import PdfWriter
 
     svgs = [
-        cjk_safe_header_svg(plain_harm_svg(plain_tempo_svg(s)))
+        cjk_safe_header_svg(stagger_harm_svg(plain_harm_svg(plain_tempo_svg(s))))
         for s in render_svg_pages(musicxml_path)
     ]
     writer = PdfWriter()

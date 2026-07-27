@@ -122,3 +122,18 @@ def test_plain_harm_svg_converts_smufl_accidentals():
     out = plain_harm_svg(svg)
     assert "F#sus4" in out and "Bb" in out
     assert out.count("") == 1, "harm外のグリフまで変換している"
+
+
+def test_force_harm_staff1_mei():
+    # Verovioがharmをstaff=2へ付け替えた場合でも五線上部(staff=1)へ強制する。
+    # harm以外の要素のstaff属性は変更しない。
+    from earpipe.services.notate.engrave import force_harm_staff1_mei
+
+    mei = (
+        '<harm xml:id="a" place="above" staff="2" tstamp="3">Esus4</harm>'
+        '<harm xml:id="b" place="above" staff="1" tstamp="1">E</harm>'
+        '<dynam staff="2">p</dynam>'
+    )
+    out = force_harm_staff1_mei(mei)
+    assert out.count('<harm xml:id="a" place="above" staff="1"') == 1
+    assert '<dynam staff="2">' in out, "harm以外のstaffまで書き換えている"
