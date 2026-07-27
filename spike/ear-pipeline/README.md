@@ -65,10 +65,23 @@ spike/ear-pipeline の採譜エンジンを macOS/Linux で動くようにセッ
 2. 多声検出(--engine poly / auto)用 .venv312 を Python 3.12 で作り basic-pitch を入れる
 3. ステム分離(--stem)用 .venv-demucs を作り demucs を入れる
 4. 各 venv は spike/ear-pipeline 直下に置く（エンジンが規約で自動検出するため）
-5. 動作確認として下記を実行し、エラーが無く出力ファイルが生成されることを報告して:
+5. GUIアプリのURL取り込み(YouTube等)も使うなら yt-dlp と ffmpeg をインストールする
+   (macOS: brew install yt-dlp ffmpeg)
+6. 動作確認として下記を実行し、エラーが無く出力ファイルが生成されることを報告して:
    .venv/bin/python -m earpipe.pipeline transcribe <サンプル音源> \
      -o out.musicxml --pdf out.pdf --tab out_tab.pdf --stem other --engine poly
 ```
+
+#### GUIアプリ（app/・URL取り込み）を使う場合のみ
+
+音源のURL取り込み（YouTube等）はユーザーマシン上の `yt-dlp` をローカル実行します。**AIで音源を取り込む際は必要なモジュールをインストールしてください**:
+
+```bash
+# macOS (Homebrew)
+brew install yt-dlp ffmpeg
+```
+
+環境変数 `EARPIPE_YTDLP` で実行ファイルを明示指定することもできます（未指定時は Homebrew → PATH の順で自動探索）。未インストールの場合、URL取り込みはエラーメッセージで正直に案内します。
 
 > **なぜ venv を 3 つに分けるか**: Basic Pitch は Python 3.12 専用、Demucs は依存が重く衝突しやすいため、メイン／多声検出／ステム分離をそれぞれ独立させています。mono 採譜だけなら `.venv` 1 つで動きます。
 
