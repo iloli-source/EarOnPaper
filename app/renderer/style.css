@@ -18,6 +18,9 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* hidden属性はdisplay指定を持つ要素(.mode-sub等のflex)にもUA既定より優先して効かせる */
+[hidden] { display: none !important; }
+
 html, body {
   height: 100%;
   background: var(--bg);
@@ -896,6 +899,113 @@ html, body {
 }
 
 .btn-back:hover { background: oklch(68% 0.21 250 / 0.18); }
+
+/* モード確認画面(採譜前): スピード重視/楽譜の数重視 */
+#state-mode {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+}
+
+.mode-title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.mode-file {
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 480px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mode-cards {
+  display: flex;
+  gap: 18px;
+}
+
+.mode-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 240px;
+  padding: 26px 20px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color var(--duration-fast), transform var(--duration-fast),
+              box-shadow var(--duration-fast), background var(--duration-fast);
+}
+
+.mode-card:hover, .mode-card:focus-visible {
+  border-color: var(--accent);
+  background: var(--bg-elevated);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px oklch(68% 0.21 250 / 0.15);
+  outline: none;
+}
+
+.mode-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.mode-card-icon { font-size: 34px; }
+
+.mode-card-name { font-size: 16px; font-weight: 700; }
+
+.mode-card-desc {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.mode-sub {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  animation: mode-sub-in var(--duration-normal) var(--ease-out-expo);
+}
+
+@keyframes mode-sub-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mode-sub { animation: none; }
+  .mode-card:hover, .mode-card:focus-visible { transform: none; }
+}
+
+.mode-sub-label { font-size: 14px; color: var(--text-muted); }
+
+.mode-sub-buttons { display: flex; gap: 12px; }
+
+.mode-sub-btn {
+  padding: 12px 30px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--duration-fast), background var(--duration-fast);
+}
+
+.mode-sub-btn:hover, .mode-sub-btn:focus-visible {
+  border-color: var(--accent);
+  background: oklch(68% 0.21 250 / 0.12);
+  outline: none;
+}
 
 /* 楽器スイッチャ */
 .instrument-switch {

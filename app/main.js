@@ -670,17 +670,26 @@ ipcMain.handle('transcribe-stem', async (event, inputPath, stemId, title = '', o
   const outConfView = path.join(outDir, `${nameStem}_${stemId}_analysis.pdf`)  // #121: 信頼度ハイライト＋波形
 
   // 分離済みwavを直接採譜(--stem 指定なし=二重分離を避ける)。engine auto。
-  // ギター(other)は TAB も単旋律で生成する。コード譜は一次導線として常時生成する。
-  const args = [
-    'transcribe', wav,
-    '-o', outMusicxml, '--pdf', outPdf, '--midi', outMidi,
-    '--chord-chart', outChordChart,
-    '--emit', `confview=${outConfView}`,
-    '--engine', 'auto',
-  ]
-  if (hasTab) args.push('--tab', outTab, '--tab-mono')
-  // 任意上書き(分かる人は指定): BPM範囲/拍子/キー。allowlistで検証してから渡す。
+  // 出力モード: full=全形式(従来) / staff=五線譜のみ / tab=TABのみ(スピード重視)。
+  // MusicXML(-o)は追加形式の再採譜回避キャッシュ(#116)のため全モードで生成する。
   const o = opts || {}
+  const requestedMode = ['staff', 'tab'].includes(o.outputMode) ? o.outputMode : 'full'
+  // TAB非対応楽器(ピアノ等)でtabを頼まれたら五線譜へフォールバック(正直に結果へ載せる)
+  const outputMode = requestedMode === 'tab' && !hasTab ? 'staff' : requestedMode
+  const args = ['transcribe', wav, '-o', outMusicxml, '--engine', 'auto']
+  if (outputMode === 'full') {
+    args.push(
+      '--pdf', outPdf, '--midi', outMidi,
+      '--chord-chart', outChordChart,
+      '--emit', `confview=${outConfView}`,
+    )
+    if (hasTab) args.push('--tab', outTab, '--tab-mono')
+  } else if (outputMode === 'staff') {
+    args.push('--pdf', outPdf)
+  } else {
+    args.push('--tab', outTab, '--tab-mono')
+  }
+  // 任意上書き(分かる人は指定): BPM範囲/拍子/キー。allowlistで検証してから渡す。
   const bpmRange = pu.normalizeBpmRange(String(o.bpmRange || ''))
   if (bpmRange) args.push('--bpm-range', bpmRange)
   if (['4/4', '3/4', '2/4'].includes(o.beat)) args.push('--beat', o.beat)
@@ -694,25 +703,31 @@ ipcMain.handle('transcribe-stem', async (event, inputPath, stemId, title = '', o
     const result = await runEngineJson(args, bpEnv(),
       (line) => safeProgress(event.sender, line, progressToken), inputPath, progressToken)
 
-    const paths = { musicxml: outMusicxml, pdf: outPdf, midi: outMidi }
+    // 必須成果物はモードで変わる: full=五線譜PDF+MIDI / staff=五線譜PDF / tab=TAB PDF
+    const paths = { musicxml: outMusicxml }
+    if (outputMode !== 'tab') paths.pdf = outPdf
+    if (outputMode === 'full') paths.midi = outMidi
+    if (outputMode === 'tab') paths.tab = outTab
     await ensureOutputs(paths)
-    if (hasTab) {
+    if (outputMode === 'full' && hasTab) {
       try {
         const st = await fs.promises.stat(outTab)
         if (st.isFile() && st.size > 0) paths.tab = outTab
       } catch { /* TAB は任意 */ }
     }
-    // コード譜(#123)は一次導線。生成できていれば paths/URL に載せる(失敗しても本体は成功)。
-    try {
-      const cst = await fs.promises.stat(outChordChart)
-      if (cst.isFile() && cst.size > 0) paths.chordChart = outChordChart
-    } catch { /* コード譜は任意: 無ければレンダラ側でタブ非表示 */ }
-    // 解析ビュー(#121: 信頼度ハイライト＋波形)。任意出力。
-    try {
-      const vst = await fs.promises.stat(outConfView)
-      if (vst.isFile() && vst.size > 0) paths.confView = outConfView
-    } catch { /* 解析ビューは任意 */ }
-    const pdfUrl = pathToFileURL(outPdf).href
+    if (outputMode === 'full') {
+      // コード譜(#123)は一次導線。生成できていれば paths/URL に載せる(失敗しても本体は成功)。
+      try {
+        const cst = await fs.promises.stat(outChordChart)
+        if (cst.isFile() && cst.size > 0) paths.chordChart = outChordChart
+      } catch { /* コード譜は任意: 無ければレンダラ側でタブ非表示 */ }
+      // 解析ビュー(#121: 信頼度ハイライト＋波形)。任意出力。
+      try {
+        const vst = await fs.promises.stat(outConfView)
+        if (vst.isFile() && vst.size > 0) paths.confView = outConfView
+      } catch { /* 解析ビューは任意 */ }
+    }
+    const pdfUrl = paths.pdf ? pathToFileURL(paths.pdf).href : null
     const tabUrl = paths.tab ? pathToFileURL(paths.tab).href : null
     const chordChartUrl = paths.chordChart ? pathToFileURL(paths.chordChart).href : null
     const confViewUrl = paths.confView ? pathToFileURL(paths.confView).href : null
@@ -723,6 +738,7 @@ ipcMain.handle('transcribe-stem', async (event, inputPath, stemId, title = '', o
       n_notes: result.n_notes, engine: result.engine,
       bpm: result.bpm, bpm_source: result.bpm_source,
       tuning_offset_cents: result.tuning_offset_cents,
+      outputMode,  // スピードモードのUI制御(view-toggle非表示等)とフォールバックの正直表示
       paths, pdfUrl, tabUrl, chordChartUrl, confViewUrl,
     }
   } catch (err) {

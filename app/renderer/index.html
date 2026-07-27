@@ -64,6 +64,32 @@
         <div class="url-note">取り込みは私的利用の範囲で行ってください。サイトの利用規約・楽曲の著作権はご自身の責任です（楽譜の公開・配布には権利処理が必要な場合があります）</div>
       </div>
 
+      <!-- MODE: 採譜前の確認。スピード重視(1形式だけ最速生成)か楽譜の数重視(全形式)を選ぶ -->
+      <div id="state-mode" class="state">
+        <div class="mode-title">どちらを重視しますか？</div>
+        <div class="mode-file" id="mode-file"></div>
+        <div class="mode-cards">
+          <button class="mode-card" id="mode-speed">
+            <span class="mode-card-icon">⚡</span>
+            <span class="mode-card-name">スピード重視</span>
+            <span class="mode-card-desc">選んだ楽譜1つだけを最速で生成します</span>
+          </button>
+          <button class="mode-card" id="mode-full">
+            <span class="mode-card-icon">📚</span>
+            <span class="mode-card-name">楽譜の数重視</span>
+            <span class="mode-card-desc">コード譜・五線譜・TAB譜・解析ビューをまとめて生成します</span>
+          </button>
+        </div>
+        <div class="mode-sub" id="mode-speed-choice" hidden>
+          <div class="mode-sub-label">どの楽譜を作りますか？</div>
+          <div class="mode-sub-buttons">
+            <button class="mode-sub-btn" id="mode-speed-tab">🎸 TAB譜</button>
+            <button class="mode-sub-btn" id="mode-speed-staff">🎼 五線譜</button>
+          </div>
+        </div>
+        <button class="btn-back" id="btn-mode-back">← 最初に戻る</button>
+      </div>
+
       <!-- PROCESSING: 処理中 -->
       <div id="state-processing" class="state">
         <!-- 背景: 宇宙(星空)＋中央に吸い込まれる音符 -->

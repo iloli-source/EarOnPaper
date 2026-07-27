@@ -155,6 +155,7 @@ function playChime() {
 
 const states = {
   idle: document.getElementById('state-idle'),
+  mode: document.getElementById('state-mode'),
   processing: document.getElementById('state-processing'),
   done: document.getElementById('state-done'),
   error: document.getElementById('state-error'),
@@ -167,6 +168,8 @@ let instrumentMeta = {}           // stemId -> {id,label,hasTab}
 const stemResults = new Map()     // stemId -> 採譜結果(このファイル内でキャッシュ)
 let currentView = 'staff'         // 'staff' | 'tab'
 let currentOverrides = {}         // 任意上書き {bpmRange, beat, keyTonic, keyMode}(曲全体に適用)
+let currentOutputMode = 'full'    // 'full'(全形式) | 'staff'(五線譜のみ) | 'tab'(TABのみ)
+let pendingFlow = null            // モード確認画面で保留中の入力 {filePath, flowId}
 let removeProgressListener = null
 let flowGeneration = 0            // 古い非同期結果が新しい入力を上書きしないための世代番号
 let urlGeneration = 0
@@ -310,6 +313,21 @@ async function startFlow(filePath, fileName) {
   stemResults.clear()
   currentInstrument = null
 
+  // 採譜前の確認: スピード重視(1形式だけ)か楽譜の数重視(全形式)かを選んでもらう
+  pendingFlow = { filePath, flowId }
+  document.getElementById('mode-file').textContent = currentTitle
+  resetModeScreen()
+  showState('mode')
+}
+
+// モード確定後に分離→採譜の本フローを再開する
+async function proceedFlow(outputMode) {
+  if (!pendingFlow) return
+  const { filePath, flowId } = pendingFlow
+  pendingFlow = null
+  if (flowId !== flowGeneration || currentInput !== filePath) return
+  currentOutputMode = outputMode
+
   document.getElementById('processing-file').textContent = currentTitle
   currentStage = -1
   setStage(0)
@@ -337,6 +355,41 @@ async function startFlow(filePath, fileName) {
     }
   }
 }
+
+// ===== モード確認画面 =====
+
+function resetModeScreen() {
+  document.getElementById('mode-speed-choice').hidden = true
+  document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('selected'))
+}
+
+document.getElementById('mode-full').addEventListener('click', () => {
+  proceedFlow('full')
+})
+
+document.getElementById('mode-speed').addEventListener('click', () => {
+  // スピード重視は2次選択(TAB譜/五線譜)を展開してから進む
+  document.getElementById('mode-speed').classList.add('selected')
+  document.getElementById('mode-full').classList.remove('selected')
+  document.getElementById('mode-speed-choice').hidden = false
+})
+
+document.getElementById('mode-speed-tab').addEventListener('click', () => {
+  proceedFlow('tab')
+})
+
+document.getElementById('mode-speed-staff').addEventListener('click', () => {
+  proceedFlow('staff')
+})
+
+document.getElementById('btn-mode-back').addEventListener('click', () => {
+  const oldInput = currentInput
+  pendingFlow = null
+  ++flowGeneration
+  currentInput = null
+  showState('idle')
+  if (oldInput) window.earpipe.releaseInput(oldInput).catch(() => {})
+})
 
 function buildInstrumentButtons(instruments) {
   instrumentMeta = {}
@@ -399,7 +452,7 @@ async function selectInstrument(
 
   const inputAtStart = currentInput
   const titleAtStart = currentTitle
-  const overridesAtStart = { ...currentOverrides }
+  const overridesAtStart = { ...currentOverrides, outputMode: currentOutputMode }
   const promise = window.earpipe.transcribeStem(
     inputAtStart, stemId, titleAtStart, overridesAtStart, progressToken,
   )
@@ -439,10 +492,12 @@ async function selectInstrument(
 const scorePanel = document.getElementById('score-panel')
 
 function renderScore(result) {
-  let url = result.pdfUrl
-  if (currentView === 'tab' && result.tabUrl) url = result.tabUrl
-  else if (currentView === 'chord' && result.chordChartUrl) url = result.chordChartUrl
-  else if (currentView === 'analysis' && result.confViewUrl) url = result.confViewUrl
+  // スピードモードでは五線譜PDFが無いこともあるため、選択ビュー→存在する形式の順で解決
+  const urls = {
+    staff: result.pdfUrl, tab: result.tabUrl,
+    chord: result.chordChartUrl, analysis: result.confViewUrl,
+  }
+  const url = urls[currentView] || result.pdfUrl || result.tabUrl
   if (!url) return
   const embed = document.createElement('embed')
   embed.src = url
@@ -468,18 +523,23 @@ function showInstrumentResult(result) {
 
   // 表示切替: コード譜(一次導線・#116)は常時、TAB はギターだけ。
   // 既定はコード譜 → TAB → 五線譜 の優先順(コード譜を一次に昇格)。
+  // スピードモード(1形式のみ)では切替の意味がないため view-toggle 自体を出さない。
+  const speedMode = result.outputMode && result.outputMode !== 'full'
   const hasTab = !!result.tabUrl
   const hasChord = !!result.chordChartUrl
   const hasAnalysis = !!result.confViewUrl
-  document.getElementById('view-toggle-card').hidden = !(hasTab || hasChord || hasAnalysis)
+  document.getElementById('view-toggle-card').hidden = speedMode || !(hasTab || hasChord || hasAnalysis)
   document.querySelector('#view-toggle .view-btn[data-view="tab"]').hidden = !hasTab
   document.querySelector('#view-toggle .view-btn[data-view="chord"]').hidden = !hasChord
   document.querySelector('#view-toggle .view-btn[data-view="analysis"]').hidden = !hasAnalysis
-  currentView = hasChord ? 'chord' : (hasTab ? 'tab' : 'staff')
+  currentView = speedMode ? (hasTab ? 'tab' : 'staff')
+    : (hasChord ? 'chord' : (hasTab ? 'tab' : 'staff'))
   updateViewButtons()
   renderScore(result)
 
-  // エクスポート: TAB/コード譜/解析ビューは生成できたときだけ表示
+  // エクスポート: 生成できた形式だけ表示(スピードモードでは五線譜/MIDIも省かれうる)
+  document.getElementById('btn-export-pdf').hidden = !result.paths?.pdf
+  document.getElementById('btn-export-midi').hidden = !result.paths?.midi
   document.getElementById('btn-export-tab').hidden = !result.paths?.tab
   document.getElementById('btn-export-chord').hidden = !result.paths?.chordChart
   document.getElementById('btn-export-analysis').hidden = !result.paths?.confView
@@ -596,6 +656,8 @@ document.getElementById('btn-retry').addEventListener('click', () => {
   currentInput = null
   currentInstrument = null
   currentOverrides = {}
+  currentOutputMode = 'full'
+  pendingFlow = null
   stemResults.clear()
   ;['opt-bpm', 'opt-beat', 'opt-key'].forEach((id) => {
     const el = document.getElementById(id)

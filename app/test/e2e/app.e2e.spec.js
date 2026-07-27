@@ -25,10 +25,19 @@ test.beforeAll(() => {
 })
 
 // ドロップと同じ入口 startFlow をテストフック経由で起動する。
-// startFlow は 楽器分離→既定楽器の採譜→DONE まで一気に進める(現行の分離フロー)。
+// startFlow はモード確認画面(スピード重視/楽譜の数重視)で停止するので、
+// 実UIのカードをクリックして分離→採譜→DONE まで進める。
 // (以前の startTranscribe はアプリが分離フローへ移行した際に廃止された)。
-async function triggerTranscribe(win, filePath) {
+async function triggerTranscribe(win, filePath, mode = 'full') {
   await win.evaluate((p) => window.__earpipeTest.startFlow(p, 'e2e'), filePath)
+  await expect(win.locator('#state-mode')).toHaveClass(/active/)
+  if (mode === 'full') {
+    await win.click('#mode-full')
+  } else {
+    // スピード重視: カード→2次選択(TAB譜/五線譜)の2段クリック
+    await win.click('#mode-speed')
+    await win.click(mode === 'tab' ? '#mode-speed-tab' : '#mode-speed-staff')
+  }
 }
 
 test('採譜→PDF表示→エクスポートUIが揃う(受入1・2・3)', async () => {
@@ -111,6 +120,50 @@ test('採譜→PDF表示→エクスポートUIが揃う(受入1・2・3)', asyn
     const cvBuf = fs.readFileSync(cvPath)
     expect(cvBuf.length).toBeGreaterThan(1000)
     expect(cvBuf.subarray(0, 5).toString()).toBe('%PDF-')
+  } finally {
+    await app.close()
+  }
+})
+
+test('スピード重視×TAB譜: モード確認画面から1形式だけ生成される', async () => {
+  const app = await electron.launch({ args: [APP_DIR], env: { ...process.env, EARPAPER_E2E: '1' } })
+  try {
+    const win = await app.firstWindow()
+
+    // モード確認画面のUIが実在する(カード2枚+2次選択)
+    await win.evaluate((p) => window.__earpipeTest.startFlow(p, 'e2e-speed'), wavPath)
+    await expect(win.locator('#state-mode')).toHaveClass(/active/)
+    await expect(win.locator('#mode-speed')).toBeVisible()
+    await expect(win.locator('#mode-full')).toBeVisible()
+    // 2次選択はスピードカードを押すまで隠れている
+    await expect(win.locator('#mode-speed-choice')).toBeHidden()
+    await win.click('#mode-speed')
+    await expect(win.locator('#mode-speed-choice')).toBeVisible()
+    await win.click('#mode-speed-tab')
+
+    // 採譜完了 → DONE。TAB PDF がアプリ内に埋め込まれる
+    await expect(win.locator('#state-done')).toHaveClass(/active/)
+    const embed = win.locator('#score-panel embed')
+    await expect(embed).toHaveAttribute('type', 'application/pdf')
+
+    // 生成物はTAB(+キャッシュ用MusicXML)のみ。五線譜PDF/MIDI/コード譜/解析ビューは作らない
+    const r = await win.evaluate(() => window.__earpipeTest?.lastResult)
+    expect(r?.outputMode).toBe('tab')
+    expect(r?.paths?.tab).toBeTruthy()
+    expect(r?.paths?.musicxml).toBeTruthy()
+    expect(r?.paths?.pdf).toBeFalsy()
+    expect(r?.paths?.midi).toBeFalsy()
+    expect(r?.paths?.chordChart).toBeFalsy()
+    expect(r?.paths?.confView).toBeFalsy()
+    const tabBuf = fs.readFileSync(r.paths.tab)
+    expect(tabBuf.length).toBeGreaterThan(1000)
+    expect(tabBuf.subarray(0, 5).toString()).toBe('%PDF-')
+
+    // 1形式だけなので表示切替は出さない。エクスポートはTABのみ表示
+    await expect(win.locator('#view-toggle-card')).toBeHidden()
+    await expect(win.locator('#btn-export-tab')).toBeVisible()
+    await expect(win.locator('#btn-export-pdf')).toBeHidden()
+    await expect(win.locator('#btn-export-midi')).toBeHidden()
   } finally {
     await app.close()
   }
