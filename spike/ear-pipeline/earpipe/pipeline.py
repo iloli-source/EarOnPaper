@@ -144,6 +144,7 @@ def transcribe_file(
     key_tonic: str | None = None,
     key_mode: str = "major",
     stem: str | None = None,
+    chords_on_staff: bool = False,
     formats: list[tuple[str, str]] | None = None,
     analyses: list[tuple[str, str]] | None = None,
     emits: list[tuple[str, str, dict]] | None = None,
@@ -334,6 +335,38 @@ def transcribe_file(
             time_signature=time_signature,
             key_tonic=key_tonic, key_mode=key_mode,
         )
+        chords_on_staff_report = None
+        if chords_on_staff:
+            # ヴォーカル＆コード1枚もの(#151): 推定コードを五線上部へ合成。
+            # --stem 併用時はボーカル単体からのコード推定が不成立のため、
+            # 分離前フルミックスを追加採譜して和声を取り、拍軸を写像する。
+            from earpipe.services.notate.chordchart import _resolve_beats
+            from earpipe.services.notate.staff_chords import inject_chords, remap_spans
+
+            if stem_used:
+                full_res = transcribe_file(
+                    in_path_orig, engine="poly",
+                    bpm_override=bpm_override, bpm_range=bpm_range,
+                    beats_per_measure=beats_per_measure,
+                    key_tonic=key_tonic, key_mode=key_mode,
+                )
+                staff_spans = remap_spans(
+                    estimate_chords(full_res["notes"], full_res["bpm"]),
+                    src=(full_res["bpm"], full_res["trimmed_leading_sec"],
+                         full_res["anchored_lead_beats"]),
+                    dst=(bpm, trimmed_sec, anchored_lead_beats),
+                )
+                chords_source = "full_mix"
+            else:
+                staff_spans = estimate_chords(notes, bpm)
+                chords_source = "self"
+            staff_beats = _resolve_beats(notes, beats_per_measure)  # 五線側と同じ拍子解決
+            n_injected = inject_chords(score, staff_spans, staff_beats)
+            chords_on_staff_report = {
+                "source": chords_source,
+                "n_injected": n_injected,
+                "n_spans": sum(1 for c in staff_spans if c.name != "N.C."),
+            }
         if out_musicxml:
             write_musicxml(score, out_musicxml)  # 譜面は常に格子側(楽譜=量子化表現)
         if out_midi:
@@ -377,6 +410,8 @@ def transcribe_file(
             result["adaptive"] = adaptive_report
         if analysis is not None:
             result["field_report"] = asdict(analysis.report)
+        if chords_on_staff_report is not None:
+            result["chords_on_staff"] = chords_on_staff_report
         if out_pdf:
             if not out_musicxml:
                 raise ValueError("--pdf にはMusicXML出力(-o)が必要")
@@ -642,6 +677,11 @@ def main(argv: list[str] | None = None) -> int:
         help="ステム分離(F-003)して指定楽器だけを採譜(vocals/drums/bass/other・要Demucs)",
     )
     pt.add_argument(
+        "--chords-on-staff", dest="chords_on_staff", action="store_true",
+        help="推定コードネームを五線譜の上部へ合成(#151 ヴォーカル＆コード1枚もの。"
+             "--stem 併用時はフルミックスを追加採譜して和声を取得)",
+    )
+    pt.add_argument(
         "--format", dest="formats", action="append", metavar="KEY[=PATH]", default=None,
         help="追加の出力形式(F-104 FORMAT_REGISTRY・複数指定可)。例: --format jianpu=out.txt。"
              "PATH省略時は '入力名.KEY.拡張子'。対応: jianpu/leadsheet/ust/abc/lilypond",
@@ -771,6 +811,7 @@ def main(argv: list[str] | None = None) -> int:
         timing=args.timing,
         title=args.title,
         stem=args.stem,
+        chords_on_staff=args.chords_on_staff,
         formats=formats,
         analyses=analyses,
         emits=emits,
