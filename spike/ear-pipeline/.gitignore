@@ -10,3 +10,4 @@ htmlcov/
 !tests/fixtures/*.musicxml
 bench/bench_out/
 .venv312/
+.venv-muscriptor/
