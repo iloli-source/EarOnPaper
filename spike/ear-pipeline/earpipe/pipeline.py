@@ -398,12 +398,14 @@ def transcribe_file(
                 grid_per_beat=grid_per_beat,
             )
         if out_chordchart:
-            # コード譜専用ビュー(#123): コードネーム＋押さえ図＋メロディ音名行。
-            # TAB/五線譜と独立に生成でき、『TABよりコード譜派』向けの一次出力候補。
+            # コード譜専用ビュー(#123, 可読化改修 #150): 押さえ図legend＋小節グリッド。
+            # 押さえ図は --no-chord-diagrams で省略可(ヴォーカル＆コード用途)。
             chords = estimate_chords(notes, bpm)
             cc_path = render_chordchart_pdf(
                 notes, chords, bpm, out_chordchart,
                 title=title or Path(in_path_orig).stem,
+                diagrams=chord_diagrams,
+                beats_per_measure=beats_per_measure,
             )
             # result は JSON 化されるため Path は str で格納する(他出力と同形)。
             result["chord_chart"] = {
@@ -586,7 +588,8 @@ def main(argv: list[str] | None = None) -> int:
     pt.add_argument("--tab-plain", dest="tab_plain", help="押さえ図なしTAB(コードネームのみ)の出力先(任意)")
     pt.add_argument(
         "--chord-chart", dest="chord_chart",
-        help="コード譜(コードネーム＋押さえ図＋メロディ音名)PDF出力先(任意・#123)",
+        help="コード譜(押さえ図legend＋小節グリッド)PDF出力先(任意・#123/#150。"
+             "--no-chord-diagrams で押さえ図なし)",
     )
     pt.add_argument(
         "--tab-mono", dest="tab_mono", action="store_true",

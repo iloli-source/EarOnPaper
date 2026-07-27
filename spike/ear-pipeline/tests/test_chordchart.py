@@ -1,7 +1,8 @@
-"""コード譜専用ビュー(chordchart.py)のテスト(#123)。
+"""コード譜専用ビュー(chordchart.py)のテスト(#123, 可読化改修 #150)。
 
-コードネーム＋押さえ図＋メロディ音名行のレイアウトが、入力の和音進行と
-旋律を正しく描画すること、および妥当なPDFを書き出すことを検証する。
+冒頭legend(ユニークコードの押さえ図)＋小節グリッド(コードネーム大書き)の
+レイアウトが、入力の和音進行を正しく描画すること、密集入力でも1小節あたり
+最大2スロットに整理されること、および妥当なPDFを書き出すことを検証する。
 """
 
 from __future__ import annotations
@@ -40,14 +41,51 @@ def test_svg_has_chord_names_and_diagrams():
     assert "<rect" in svg
 
 
-def test_svg_has_melody_note_names():
-    # メロディ行に旋律(各拍の最高音)の音名が載る。C E G C の最高音 = G5,C6,D6,G5相当
+def test_no_melody_note_row():
+    # 可読化改修(#150): メロディ音名行は廃止(旋律は五線譜/MusicXML側が担う)。
     notes = _progression()
     chords = estimate_chords(notes, bpm=120)
     svg = " ".join(_render_chordchart_pages(notes, chords, 120.0, title="CC"))
-    # 各オンセット最高音: 67(G4),72(C5),74(D5),67(G4) → 音名 G/C/D が現れる
     for name in ("G4", "C5", "D5"):
-        assert name in svg, f"メロディ音名 {name} が描画されていない"
+        assert f">{name}<" not in svg, f"廃止済みのメロディ音名 {name} が描画されている"
+
+
+def test_legend_shows_each_unique_chord_once():
+    # legendにはユニークコードが1回ずつ(進行 C→F→G→C なら C は1個)。
+    notes = _progression()
+    chords = estimate_chords(notes, bpm=120)
+    svg = " ".join(_render_chordchart_pages(notes, chords, 120.0, title="CC"))
+    unique = {c.name for c in chords if c.name != "N.C."}
+    for name in unique:
+        assert svg.count(f'class="legend-name">{name}<') == 1, (
+            f"legendのコード {name} が1回ちょうどでない"
+        )
+
+
+def test_dense_chords_capped_at_two_slots_per_measure():
+    # 1拍ごとにコードが揺れる密集入力でも、グリッドは1小節最大2スロットに整理される。
+    from earpipe.services.notate.chord import ChordSpan
+
+    names = ("C", "F", "G", "Am")
+    dense = [
+        ChordSpan(start_beats=float(b), end_beats=float(b + 1),
+                  name=names[b % 4], root_pc=(0, 5, 7, 9)[b % 4],
+                  quality="major" if b % 4 < 3 else "minor")
+        for b in range(8)
+    ]
+    svg = " ".join(_render_chordchart_pages([], dense, 120.0, title="dense"))
+    n_grid_labels = svg.count('class="grid-chord"')
+    assert n_grid_labels <= 2 * 2, f"2小節で最大4スロットのはずが {n_grid_labels} 個描画"
+
+
+def test_diagrams_false_omits_legend():
+    # ヴォーカル＆コード用途(#150): diagrams=False では押さえ図legendを描かず、
+    # グリッドのコードネームだけを出す(押さえ図はギター奏者向けのオプトイン)。
+    notes = _progression()
+    chords = estimate_chords(notes, bpm=120)
+    svg = " ".join(_render_chordchart_pages(notes, chords, 120.0, title="CC", diagrams=False))
+    assert 'class="legend-name"' not in svg, "diagrams=False なのに legend が描画されている"
+    assert svg.count('class="grid-chord"') >= 3, "グリッドのコードネームが消えている"
 
 
 def test_render_chordchart_pdf_valid(tmp_path: Path):
@@ -59,6 +97,26 @@ def test_render_chordchart_pdf_valid(tmp_path: Path):
     assert out.exists() and out.stat().st_size > 0
     assert out.read_bytes().startswith(b"%PDF")
     assert len(pypdf.PdfReader(str(out)).pages) >= 1
+
+
+def test_same_chord_across_measures_elided_as_continuation():
+    # 継続省略(#150の中核): 全小節が同一コードなら、コードネームは最初の1回だけ。
+    from earpipe.services.notate.chord import ChordSpan
+
+    held = [ChordSpan(start_beats=0.0, end_beats=16.0, name="C", root_pc=0, quality="major")]
+    svg = " ".join(_render_chordchart_pages([], held, 120.0, title="hold"))
+    assert svg.count('class="grid-chord"') == 1, "継続小節でコード名が省略されていない"
+
+
+def test_all_nc_input_renders_empty_grid():
+    # 全区間 N.C.(和声的に曖昧な曲): 落ちずに空グリッドのPDFになる。
+    from earpipe.services.notate.chord import ChordSpan
+
+    nc = [ChordSpan(start_beats=0.0, end_beats=32.0, name="N.C.", root_pc=-1, quality="")]
+    svg = " ".join(_render_chordchart_pages([], nc, 120.0, title="nc"))
+    assert 'class="grid-chord"' not in svg
+    assert 'class="legend-name"' not in svg
+    assert "<svg" in svg
 
 
 def test_empty_notes_still_makes_pdf(tmp_path: Path):
