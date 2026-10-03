@@ -5,12 +5,16 @@
 
 ## 実行
 
+公式リリースの `tla2tools.jar`（TLA+ tools）と Java 11 以降を用意し、`tlc-checks.json` に並んだ
+spec と config の組を 1 件ずつ TLC にかける。
+
 ```bash
-source ~/.tla/env.sh
-node ~/.claude/skills/tla-debug/scripts/run_tlc_matrix.mjs formal/tlc-checks.json
+cd formal
+java -cp /path/to/tla2tools.jar tlc2.TLC -config InputLifecycleFixed.cfg InputLifecycle.tla
 ```
 
-`*Bug*.cfg` は名前の付いた不変条件の違反を再現できれば成功、`*Fixed.cfg` と `*NoCleanup.cfg` は違反なしで成功。
+`tlc-checks.json` の `expect` が各組の期待結果。`*Bug*.cfg` は名前の付いた不変条件の違反を再現できれば成功、
+`*Fixed.cfg` と `*NoCleanup.cfg` は違反なしで成功。
 
 ## 追跡の鎖
 
