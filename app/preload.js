@@ -43,8 +43,9 @@ contextBridge.exposeInMainWorld('earpipe', {
   importUrl: (url, progressToken) => ipcRenderer.invoke('import-url', url, progressToken),
   saveFile: (src, ext, name) => ipcRenderer.invoke('save-file', src, ext, name),
   // 詳細エクスポート(簡譜/度数/GP5等)。savePath は E2E 時のみ使用。
-  exportExtra: (inputPath, key, e2eSavePath, defaultName) =>
-    ipcRenderer.invoke('export-extra', inputPath, key, e2eSavePath, defaultName),
+  // stemId は表示中の楽器(その楽器の採譜結果から生成させる)。
+  exportExtra: (inputPath, key, e2eSavePath, defaultName, stemId) =>
+    ipcRenderer.invoke('export-extra', inputPath, key, e2eSavePath, defaultName, stemId),
   openExternal: (filePath) => ipcRenderer.invoke('open-external', filePath),
   getPathForFile: (file) => webUtils.getPathForFile(file),
   // 3.3: クロスプラットフォームな basename を renderer 側へ公開(純粋・sandbox安全)

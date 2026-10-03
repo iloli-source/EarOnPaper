@@ -606,7 +606,7 @@ document.querySelectorAll('#extra-export-buttons .btn-export-extra').forEach((bt
     btn.disabled = true
     setStatus('is-busy', '生成中…')
     try {
-      const saved = await window.earpipe.exportExtra(currentInput, key, null, name)
+      const saved = await window.earpipe.exportExtra(currentInput, key, null, name, currentInstrument)
       // saved=null は保存ダイアログのキャンセル(正常系・無表示に戻す)
       setStatus(saved ? 'is-done' : null, saved ? '✓ 保存' : '')
     } catch {
