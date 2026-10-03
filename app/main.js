@@ -5,6 +5,7 @@ const fs = require('fs')
 const os = require('os')
 const { pathToFileURL } = require('url')
 const pu = require('./platform-utils')
+const { createInputState } = require('./input-state')
 
 const ENGINE_DIR = path.resolve(__dirname, '../spike/ear-pipeline')
 // 3.2: OS別候補から実在するPythonを解決(POSIX固定をやめWindows/構成差に対応)
@@ -33,14 +34,18 @@ const MAX_ACTIVE_PROCESSES = pu.boundedPositiveInt(
   process.env.EARPIPE_MAX_ACTIVE_PROCESSES, 2, 1, 8,
 )
 
-// 分離済みステムwavのキャッシュ: inputPath -> { dir, stems: {name: wavPath} }。
-// 分離(Demucs)は重いので1入力につき1回だけ実行し、選ばれた楽器だけ後段で採譜する。
-const separationCache = new Map()
-
-// 採譜済み中間物のキャッシュ: inputPath -> MusicXML パス(#116)。
-// 追加形式(簡譜/度数/移動ド等)を出す際、音声からのフル再採譜(Demucs+basic-pitch)を
-// やり直さず、この採譜済み MusicXML から render サブコマンドで高速生成するために保持する。
-const primaryMusicxmlByInput = new Map()
+// 入力ごとの世代と、世代に紐づくキャッシュ(#152)。ハンドラは開始時のチケットを await の
+// 後で照合し、release-input や終了時の後始末に追い越された結果を公開しない。
+// - 分離済みステムwav: inputPath -> { dir, stems: {name: wavPath} }。
+//   分離(Demucs)は重いので1入力につき1回だけ実行し、選ばれた楽器だけ後段で採譜する。
+// - 採譜済み中間物: (inputPath, 楽器) -> MusicXML パス(#116)。
+//   追加形式(簡譜/度数/移動ド等)を出す際、音声からのフル再採譜(Demucs+basic-pitch)を
+//   やり直さず、この採譜済み MusicXML から render サブコマンドで高速生成するために保持する。
+const inputState = createInputState()
+// 楽器分離を経ない採譜(transcribe)の MusicXML を保持するキー
+const WHOLE_MIX_STEM = ''
+// 子プロセスの一時領域(TMPDIR)を置く、追跡中ルート直下のディレクトリ名
+const CHILD_TMP_DIRNAME = 'tmp'
 
 // 抽出楽器のメタ(表示順)。6-stem(htdemucs_6s)でギター/ピアノを分離して個別提示する。
 // drums(非音程)と other(残差)は除外。ギターをデフォルト先頭にしTABを持たせる。
@@ -152,8 +157,7 @@ function cleanupAllResources() {
   generatedRoots.clear()
   rootsByInput.clear()
   sourceRootsByInput.clear()
-  separationCache.clear()
-  primaryMusicxmlByInput.clear()
+  inputState.invalidateAll()
 }
 
 app.on('before-quit', cleanupAllResources)
@@ -165,6 +169,15 @@ function registerRoot(root, inputPath = null) {
     rootsByInput.get(inputPath).add(root)
   }
   return root
+}
+
+// 子プロセスの一時領域を追跡中ルート配下へ向ける。プロセスグループごと SIGKILL すると
+// Python 側の finally(一時wav/ステムdirの削除)が走らないため、OSの一時領域に置かせず、
+// ルートの削除(release-input/終了時)で一緒に消えるようにする。
+function withChildTmp(env, root) {
+  const childTmp = path.join(root, CHILD_TMP_DIRNAME)
+  fs.mkdirSync(childTmp, { recursive: true })
+  return { ...env, TMPDIR: childTmp, TEMP: childTmp, TMP: childTmp }
 }
 
 function associateRoot(root, inputPath) {
@@ -196,14 +209,18 @@ function removeRoot(root) {
 
 async function releaseInputResources(inputPath, { preserveSource = false } = {}) {
   if (!inputPath) return
-  const stopping = []
-  for (const proc of [...activeProcesses]) {
-    if (processInputs.get(proc) === inputPath) {
-      stopping.push(waitForProcessClose(proc))
-      killProcessTree(proc, 'SIGKILL')
+  // 停止待ち(await)より前に世代を進め、この入力で進行中のハンドラの結果を無効にする。
+  inputState.invalidateInput(inputPath)
+  // 停止待ちの間に同じ入力の子プロセスが新たに始まり得るため、残りが無くなるまで止め直す。
+  for (;;) {
+    const stopping = []
+    for (const proc of [...activeProcesses]) {
+      if (processInputs.get(proc) === inputPath) {
+        stopping.push(waitForProcessClose(proc))
+        killProcessTree(proc, 'SIGKILL')
+      }
     }
-  }
-  if (stopping.length > 0) {
+    if (stopping.length === 0) break
     const closed = await Promise.all(stopping)
     if (closed.some((ok) => !ok)) throw new Error('実行中プロセスを安全に停止できませんでした')
   }
@@ -216,8 +233,7 @@ async function releaseInputResources(inputPath, { preserveSource = false } = {})
     rootsByInput.delete(inputPath)
     sourceRootsByInput.delete(inputPath)
   }
-  separationCache.delete(inputPath)
-  primaryMusicxmlByInput.delete(inputPath)
+  inputState.invalidateInput(inputPath)
 }
 
 ipcMain.handle('release-input', async (_, inputPath) => {
@@ -421,6 +437,7 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '
     throw new Error('入力ファイルが見つからないか、ファイルではありません')
   }
 
+  const ticket = inputState.capture(inputPath)
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-'))
   registerRoot(tmpDir, inputPath)  // 入力単位で追跡し、切替時にも削除
   const baseName = pu.snakeFileStem(path.basename(inputPath, path.extname(inputPath)))
@@ -456,7 +473,7 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '
   }
 
   try {
-    const result = await runEngineJson(args, env,
+    const result = await runEngineJson(args, withChildTmp(env, tmpDir),
       (line) => safeProgress(event.sender, line, progressToken), inputPath, progressToken)
     const paths = { musicxml: outMusicxml, pdf: outPdf, midi: outMidi }
     await ensureOutputs(paths)
@@ -480,7 +497,8 @@ ipcMain.handle('transcribe', async (event, inputPath, engine = 'auto', title = '
         confViewUrl = pathToFileURL(outConfView).href
       }
     } catch { /* 任意 */ }
-    primaryMusicxmlByInput.set(inputPath, outMusicxml)
+    // await の間に入力が解放されていたら throw し、下の catch で出力ルートごと破棄する
+    inputState.publishMusicxml(ticket, WHOLE_MIX_STEM, outMusicxml)
     return { ...result, paths, pdfUrl: pathToFileURL(outPdf).href, chordChartUrl, confViewUrl }
   } catch (err) {
     removeRoot(tmpDir)
@@ -596,11 +614,12 @@ ipcMain.handle('separate-audio', async (event, inputPath, progressToken = null) 
 
   // 同じ入力を再処理する場合、旧ステム・譜面・実行中プロセスを先に解放する。
   await releaseInputResources(inputPath, { preserveSource: true })
+  const ticket = inputState.capture(inputPath)
   const sepDir = registerRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-sep-')), inputPath)
   try {
     const result = await runEngineJson(
       ['separate', inputPath, '--out-dir', sepDir],
-      { ...process.env },
+      withChildTmp({ ...process.env }, sepDir),
       (line) => safeProgress(event.sender, line, progressToken),
       inputPath,
       progressToken,
@@ -621,7 +640,7 @@ ipcMain.handle('separate-audio', async (event, inputPath, progressToken = null) 
         }
       } catch { /* 不正・欠落ステムは候補から落とす */ }
     }
-    separationCache.set(inputPath, { dir: sepDir, stems })
+    inputState.publishSeparation(ticket, { dir: sepDir, stems })
     const instruments = INSTRUMENTS
       .filter((it) => stems[it.id])
       .map((it) => ({ id: it.id, label: it.label, hasTab: it.hasTab }))
@@ -629,7 +648,7 @@ ipcMain.handle('separate-audio', async (event, inputPath, progressToken = null) 
     return { instruments }
   } catch (err) {
     removeRoot(sepDir)
-    separationCache.delete(inputPath)
+    inputState.discardSeparation(ticket)
     throw err
   }
 })
@@ -638,7 +657,8 @@ ipcMain.handle('separate-audio', async (event, inputPath, progressToken = null) 
 ipcMain.handle('transcribe-stem', async (event, inputPath, stemId, title = '', opts = {}, progressToken = null) => {
   const meta = INSTRUMENTS.find((it) => it.id === stemId)
   if (!meta) throw new Error('対応していない楽器です')
-  const cache = separationCache.get(inputPath)
+  const ticket = inputState.capture(inputPath)
+  const cache = inputState.getSeparation(inputPath)
   if (!cache || !cache.stems[stemId]) {
     throw new Error('分離結果が見つかりません。もう一度ファイルを読み込んでください')
   }
@@ -700,7 +720,7 @@ ipcMain.handle('transcribe-stem', async (event, inputPath, stemId, title = '', o
   if (safeTitle) args.push('--title', pu.clampTitle(`${safeTitle} (${meta.label})`))
 
   try {
-    const result = await runEngineJson(args, bpEnv(),
+    const result = await runEngineJson(args, withChildTmp(bpEnv(), outDir),
       (line) => safeProgress(event.sender, line, progressToken), inputPath, progressToken)
 
     // 必須成果物はモードで変わる: full=五線譜PDF+MIDI / staff=五線譜PDF / tab=TAB PDF
@@ -731,8 +751,9 @@ ipcMain.handle('transcribe-stem', async (event, inputPath, stemId, title = '', o
     const tabUrl = paths.tab ? pathToFileURL(paths.tab).href : null
     const chordChartUrl = paths.chordChart ? pathToFileURL(paths.chordChart).href : null
     const confViewUrl = paths.confView ? pathToFileURL(paths.confView).href : null
-    // #116: 追加形式の再採譜回避用に採譜済み MusicXML を保持(inputPath基準)
-    primaryMusicxmlByInput.set(inputPath, outMusicxml)
+    // #116: 追加形式の再採譜回避用に採譜済み MusicXML を保持((inputPath, 楽器)基準)。
+    // await の間に入力が解放されていたら throw し、下の catch で出力ルートごと破棄する
+    inputState.publishMusicxml(ticket, stemId, outMusicxml)
     return {
       stem: stemId, label: meta.label,
       n_notes: result.n_notes, engine: result.engine,
@@ -780,7 +801,8 @@ async function runEngine(args, env = { ...process.env }, inputPath = null) {
 
 // 追加出力を1つ生成して保存する。savePath は E2E(EARPAPER_E2E=1)のときだけ引数指定を許し、
 // それ以外は必ず保存ダイアログを出す(本番でレンダラが任意パスへ書けないようにする)。
-ipcMain.handle('export-extra', async (_, inputPath, key, e2eSavePath, defaultName) => {
+// stemId は表示中の楽器。採譜済み MusicXML を楽器ごとに引くために受け取る(#152)。
+ipcMain.handle('export-extra', async (_, inputPath, key, e2eSavePath, defaultName, stemId = null) => {
   const spec = EXTRA_OUTPUTS[key]
   if (!spec) throw new Error('対応していない出力形式です')
   if (!pu.isAllowedAudioInput(inputPath)) throw new Error('入力音声が不正です')
@@ -789,6 +811,8 @@ ipcMain.handle('export-extra', async (_, inputPath, key, e2eSavePath, defaultNam
   } catch {
     throw new Error('元の音声ファイルが見つかりません')
   }
+  const stemKey = INSTRUMENTS.some((it) => it.id === stemId) ? stemId : WHOLE_MIX_STEM
+  const ticket = inputState.capture(inputPath)
 
   let savePath
   let e2eReturnPath = null  // #129: 呼び出し側が渡した表記(シンボリックリンク未解決)で返す
@@ -814,20 +838,27 @@ ipcMain.handle('export-extra', async (_, inputPath, key, e2eSavePath, defaultNam
     })
     if (res.canceled) return null
     savePath = res.filePath
+    // 保存ダイアログ待ちの間に入力が解放されていたら、解放済みの入力では生成しない
+    inputState.assertCurrent(ticket)
   }
 
   const flag = spec.kind === 'format' ? '--format' : '--analysis'
   // #116: 採譜済み中間物(MusicXML)があれば render で再利用し、フル再採譜
   // (Demucs分離+basic-pitch検出)をやり直さない。無い場合のみ音声から再採譜する。
-  const cachedXml = primaryMusicxmlByInput.get(inputPath)
+  const cachedXml = inputState.getMusicxml(inputPath, stemKey)
   if (cachedXml && fs.existsSync(cachedXml)) {
     await runEngine(['render', '--from-musicxml', cachedXml, flag, `${key}=${savePath}`],
-      { ...process.env }, inputPath)
+      withChildTmp({ ...process.env }, path.dirname(cachedXml)), inputPath)
   } else {
     const tmpDir = registerRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'earpaper-x-')), inputPath)
     const tmpXml = path.join(tmpDir, 'base.musicxml')  // lilypond 等は -o(MusicXML)を要する
-    await runEngine(['transcribe', inputPath, '-o', tmpXml, flag, `${key}=${savePath}`, '--engine', 'auto'],
-      bpEnv(), inputPath)
+    try {
+      await runEngine(['transcribe', inputPath, '-o', tmpXml, flag, `${key}=${savePath}`, '--engine', 'auto'],
+        withChildTmp(bpEnv(), tmpDir), inputPath)
+    } finally {
+      // 中間 MusicXML は再利用しないため、成否によらずこの呼び出しの一時ルートを残さない
+      removeRoot(tmpDir)
+    }
   }
 
   // 生成物の実体(存在・非空)を確認してから成功応答(偽成功防止)
