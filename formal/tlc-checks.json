@@ -1,0 +1,15 @@
+{
+  "root": ".",
+  "concurrency": 2,
+  "checks": [
+    { "spec": "InputLifecycle.tla",  "config": "InputLifecycleBugRelease.cfg",  "expect": { "kind": "invariant-violation", "name": "NoPublishAfterRelease" } },
+    { "spec": "InputLifecycle.tla",  "config": "InputLifecycleBugCleanup.cfg",  "expect": { "kind": "invariant-violation", "name": "NoPublishAfterRelease" } },
+    { "spec": "InputLifecycle.tla",  "config": "InputLifecycleBugOrphan.cfg",   "expect": { "kind": "invariant-violation", "name": "NoOrphanEngine" } },
+    { "spec": "InputLifecycle.tla",  "config": "InputLifecycleFixed.cfg",       "expect": { "kind": "pass" } },
+    { "spec": "StemCache.tla",       "config": "StemCacheBug.cfg",              "expect": { "kind": "invariant-violation", "name": "CacheKeyMatchesInstrument" } },
+    { "spec": "StemCache.tla",       "config": "StemCacheFixed.cfg",            "expect": { "kind": "pass" } },
+    { "spec": "SeparationOwner.tla", "config": "SeparationOwnerBug.cfg",        "expect": { "kind": "invariant-violation", "name": "OwnerOnlyDelete" } },
+    { "spec": "SeparationOwner.tla", "config": "SeparationOwnerNoCleanup.cfg",  "expect": { "kind": "pass" } },
+    { "spec": "SeparationOwner.tla", "config": "SeparationOwnerFixed.cfg",      "expect": { "kind": "pass" } }
+  ]
+}
